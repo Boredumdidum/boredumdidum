@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TaskFlow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,700;1,9..144,300&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --ink: #1a1a18;
+    --paper: #f5f0e8;
+    --accent: #c84b2f;
+    --muted: #8a8578;
+    --line: #d8d2c4;
+    --gcal: #1a73e8;
+    --gcal-hover: #1557b0;
+    --done: #4a7c5e;
+  }
+
+  body {
+    font-family: 'DM Mono', monospace;
+    background: var(--paper);
+    color: var(--ink);
+    min-height: 100vh;
+    padding: 0;
+    overflow-x: hidden;
+  }
+
+  /* Ruled paper background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: repeating-linear-gradient(
+      transparent,
+      transparent 31px,
+      var(--line) 31px,
+      var(--line) 32px
+    );
+    opacity: 0.4;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    position: relative;
+    z-index: 1;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 48px 24px 80px;
+  }
+
+  /* Header */
+  header {
+    margin-bottom: 48px;
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 16px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .logo {
+    font-family: 'Fraunces', serif;
+    font-size: 2.4rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1;
+  }
+
+  .logo span {
+    color: var(--accent);
+  }
+
+  .gcal-btn {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.75rem;
+    padding: 8px 16px;
+    background: transparent;
+    border: 1.5px solid var(--ink);
+    color: var(--ink);
+    cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .gcal-btn:hover { background: var(--ink); color: var(--paper); }
+  .gcal-btn.connected { border-color: var(--gcal); color: var(--gcal); }
+  .gcal-btn.connected:hover { background: var(--gcal); color: white; }
+
+  .gcal-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* Config panel */
+  .config-panel {
+    background: white;
+    border: 1.5px solid var(--ink);
+    padding: 20px;
+    margin-bottom: 32px;
+    display: none;
+  }
+
+  .config-panel.open { display: block; }
+
+  .config-panel h3 {
+    font-family: 'Fraunces', serif;
+    font-size: 1rem;
+    margin-bottom: 12px;
+    font-weight: 300;
+    font-style: italic;
+  }
+
+  .config-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .config-input {
+    flex: 1;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.75rem;
+    padding: 8px 10px;
+    border: 1.5px solid var(--line);
+    background: var(--paper);
+    color: var(--ink);
+    outline: none;
+  }
+
+  .config-input:focus { border-color: var(--ink); }
+
+  .config-save {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.75rem;
+    padding: 8px 16px;
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    cursor: pointer;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .config-note {
+    font-size: 0.65rem;
+    color: var(--muted);
+    line-height: 1.5;
+    margin-top: 8px;
+  }
+
+  .config-note a { color: var(--gcal); }
+
+  /* Input area */
+  .add-task {
+    display: flex;
+    gap: 0;
+    margin-bottom: 40px;
+    position: relative;
+  }
+
+  .add-task input {
+    flex: 1;
+    font-family: 'Fraunces', serif;
+    font-size: 1.1rem;
+    font-weight: 300;
+    font-style: italic;
+    padding: 14px 16px;
+    border: 1.5px solid var(--ink);
+    border-right: none;
+    background: white;
+    color: var(--ink);
+    outline: none;
+    transition: box-shadow 0.15s;
+  }
+
+  .add-task input::placeholder { color: var(--muted); }
+  .add-task input:focus { box-shadow: 3px 3px 0 var(--ink); }
+
+  .task-options {
+    display: flex;
+    flex-direction: column;
+    border: 1.5px solid var(--ink);
+    background: white;
+    border-right: none;
+  }
+
+  .task-options input[type="datetime-local"],
+  .task-options input[type="number"] {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    padding: 6px 8px;
+    border: none;
+    border-bottom: 1px solid var(--line);
+    background: transparent;
+    color: var(--ink);
+    outline: none;
+    width: 160px;
+  }
+
+  .task-options input[type="number"] {
+    border-bottom: none;
+  }
+
+  .add-btn {
+    font-family: 'DM Mono', monospace;
+    font-size: 1.2rem;
+    padding: 0 20px;
+    background: var(--accent);
+    color: white;
+    border: 1.5px solid var(--ink);
+    cursor: pointer;
+    transition: transform 0.1s, box-shadow 0.1s;
+    font-weight: 500;
+  }
+
+  .add-btn:hover { transform: translate(-2px, -2px); box-shadow: 3px 3px 0 var(--ink); }
+  .add-btn:active { transform: translate(0,0); box-shadow: none; }
+
+  /* Filters */
+  .filters {
+    display: flex;
+    gap: 0;
+    margin-bottom: 24px;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .filter-btn {
+    padding: 6px 14px;
+    border: 1.5px solid var(--ink);
+    border-right: none;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    transition: all 0.1s;
+  }
+
+  .filter-btn:last-child { border-right: 1.5px solid var(--ink); }
+  .filter-btn.active { background: var(--ink); color: var(--paper); }
+  .filter-btn:hover:not(.active) { background: var(--line); }
+
+  /* Task list */
+  .task-list { list-style: none; }
+
+  .task-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--line);
+    animation: slideIn 0.2s ease;
+    position: relative;
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .task-check {
+    width: 18px; height: 18px;
+    border: 1.5px solid var(--ink);
+    background: white;
+    cursor: pointer;
+    flex-shrink: 0;
+    margin-top: 3px;
+    position: relative;
+    transition: all 0.15s;
+  }
+
+  .task-check:hover { background: var(--line); }
+
+  .task-check.checked {
+    background: var(--done);
+    border-color: var(--done);
+  }
+
+  .task-check.checked::after {
+    content: '✓';
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 11px;
+    line-height: 1;
+  }
+
+  .task-body { flex: 1; min-width: 0; }
+
+  .task-text {
+    font-family: 'Fraunces', serif;
+    font-size: 1rem;
+    font-weight: 300;
+    line-height: 1.4;
+    transition: all 0.2s;
+  }
+
+  .task-item.done .task-text {
+    text-decoration: line-through;
+    color: var(--muted);
+  }
+
+  .task-meta {
+    display: flex;
+    gap: 12px;
+    margin-top: 4px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .task-date {
+    font-size: 0.65rem;
+    color: var(--muted);
+    letter-spacing: 0.03em;
+  }
+
+  .gcal-badge {
+    font-size: 0.6rem;
+    padding: 2px 6px;
+    background: var(--gcal);
+    color: white;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    border-radius: 2px;
+  }
+
+  .gcal-push-btn {
+    font-size: 0.6rem;
+    padding: 2px 8px;
+    background: transparent;
+    border: 1px solid var(--gcal);
+    color: var(--gcal);
+    cursor: pointer;
+    font-family: 'DM Mono', monospace;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    transition: all 0.1s;
+  }
+
+  .gcal-push-btn:hover { background: var(--gcal); color: white; }
+  .gcal-push-btn:disabled { opacity: 0.4; cursor: default; }
+
+  .task-delete {
+    font-size: 0.9rem;
+    background: none;
+    border: none;
+    color: var(--line);
+    cursor: pointer;
+    padding: 2px 4px;
+    transition: color 0.15s;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  .task-delete:hover { color: var(--accent); }
+
+  /* Empty state */
+  .empty {
+    text-align: center;
+    padding: 60px 0;
+    color: var(--muted);
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 1.1rem;
+    font-weight: 300;
+  }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--ink);
+    color: var(--paper);
+    padding: 10px 20px;
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+    z-index: 100;
+    transition: transform 0.25s ease;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+
+  .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast.error { background: var(--accent); }
+
+  /* Stats */
+  .stats {
+    font-size: 0.65rem;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+
+  .stats span { color: var(--ink); font-weight: 500; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <div class="logo">Task<span>Flow</span></div>
+    <button class="gcal-btn" id="gcalBtn" onclick="toggleConfig()">
+      <span id="gcalStatus">⚙ Configure GCal</span>
+    </button>
+  </header>
+
+  <!-- Config Panel -->
+  <div class="config-panel" id="configPanel">
+    <h3>Google Calendar API Setup</h3>
+    <div class="config-row">
+      <input class="config-input" id="clientIdInput" type="text" placeholder="OAuth 2.0 Client ID (ends in .apps.googleusercontent.com)" />
+    </div>
+    <div class="config-row">
+      <input class="config-input" id="calendarIdInput" type="text" placeholder="Calendar ID (default: primary)" value="primary" />
+      <button class="config-save" onclick="saveConfig()">Save</button>
+    </div>
+    <p class="config-note">
+      1. Go to <a href="https://console.cloud.google.com" target="_blank">Google Cloud Console</a> → APIs & Services → Credentials<br>
+      2. Create OAuth 2.0 Client ID (Web app) → add this page's URL to Authorized JavaScript Origins<br>
+      3. Enable the Google Calendar API<br>
+      4. Paste your Client ID above and click Save
+    </p>
+  </div>
+
+  <!-- Add Task -->
+  <div class="add-task">
+    <input type="text" id="taskInput" placeholder="What needs doing…" onkeydown="if(event.key==='Enter') addTask()" />
+    <div class="task-options">
+      <input type="datetime-local" id="taskDate" title="Due date/time" />
+      <input type="number" id="taskDuration" min="15" step="15" placeholder="mins (e.g. 30)" title="Duration in minutes" />
+    </div>
+    <button class="add-btn" onclick="addTask()">+</button>
+  </div>
+
+  <!-- Filters -->
+  <div class="filters">
+    <button class="filter-btn active" onclick="setFilter('all', this)">All</button>
+    <button class="filter-btn" onclick="setFilter('active', this)">Active</button>
+    <button class="filter-btn" onclick="setFilter('done', this)">Done</button>
+    <button class="filter-btn" onclick="setFilter('gcal', this)">In GCal</button>
+  </div>
+
+  <div class="stats" id="stats"></div>
+
+  <ul class="task-list" id="taskList"></ul>
+  <div class="empty" id="emptyState" style="display:none">No tasks here yet.</div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- Google Identity Services -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────
+let tasks = JSON.parse(localStorage.getItem('tf_tasks') || '[]');
+let config = JSON.parse(localStorage.getItem('tf_config') || '{}');
+let tokenClient = null;
+let accessToken = null;
+let currentFilter = 'all';
+
+// ── Config ─────────────────────────────────────────────────────────────
+function saveConfig() {
+  const clientId = document.getElementById('clientIdInput').value.trim();
+  const calendarId = document.getElementById('calendarIdInput').value.trim() || 'primary';
+  if (!clientId) { showToast('Paste your Client ID first', true); return; }
+  config = { clientId, calendarId };
+  localStorage.setItem('tf_config', JSON.stringify(config));
+  initGoogleAuth();
+  document.getElementById('configPanel').classList.remove('open');
+  showToast('Config saved — click Connect to authenticate');
+}
+
+function toggleConfig() {
+  const panel = document.getElementById('configPanel');
+  if (config.clientId) {
+    // If configured, toggle auth
+    if (!accessToken) {
+      authenticate();
+    } else {
+      accessToken = null;
+      updateGCalButton(false);
+      showToast('Disconnected from Google Calendar');
+    }
+    return;
+  }
+  panel.classList.toggle('open');
+  if (panel.classList.contains('open') && config.clientId) {
+    document.getElementById('clientIdInput').value = config.clientId;
+    document.getElementById('calendarIdInput').value = config.calendarId || 'primary';
+  }
+}
+
+// ── Google Auth ────────────────────────────────────────────────────────
+function initGoogleAuth() {
+  if (!config.clientId) return;
+
+  document.getElementById('clientIdInput').value = config.clientId;
+  document.getElementById('calendarIdInput').value = config.calendarId || 'primary';
+
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: config.clientId,
+    scope: 'https://www.googleapis.com/auth/calendar.events',
+    callback: (resp) => {
+      if (resp.error) { showToast('Auth failed: ' + resp.error, true); return; }
+      accessToken = resp.access_token;
+      updateGCalButton(true);
+      showToast('Connected to Google Calendar ✓');
+    },
+  });
+
+  updateGCalButton(false);
+}
+
+function authenticate() {
+  if (!tokenClient) { showToast('Save your config first', true); return; }
+  tokenClient.requestAccessToken();
+}
+
+function updateGCalButton(connected) {
+  const btn = document.getElementById('gcalBtn');
+  const status = document.getElementById('gcalStatus');
+  if (connected) {
+    btn.classList.add('connected');
+    status.innerHTML = '<span class="gcal-dot"></span> GCal Connected';
+  } else {
+    btn.classList.remove('connected');
+    status.textContent = config.clientId ? '⚡ Connect GCal' : '⚙ Configure GCal';
+  }
+  render();
+}
+
+// ── Tasks ──────────────────────────────────────────────────────────────
+function addTask() {
+  const input = document.getElementById('taskInput');
+  const text = input.value.trim();
+  if (!text) return;
+
+  const dateVal = document.getElementById('taskDate').value;
+  const durVal = parseInt(document.getElementById('taskDuration').value) || 60;
+
+  const task = {
+    id: Date.now().toString(),
+    text,
+    done: false,
+    createdAt: new Date().toISOString(),
+    dueDate: dateVal || null,
+    duration: durVal,
+    gcalEventId: null,
+  };
+
+  tasks.unshift(task);
+  save();
+  input.value = '';
+  document.getElementById('taskDate').value = '';
+  document.getElementById('taskDuration').value = '';
+  render();
+  input.focus();
+}
+
+function toggleDone(id) {
+  const t = tasks.find(t => t.id === id);
+  if (t) { t.done = !t.done; save(); render(); }
+}
+
+function deleteTask(id) {
+  tasks = tasks.filter(t => t.id !== id);
+  save();
+  render();
+}
+
+async function pushToGCal(id) {
+  if (!accessToken) { authenticate(); return; }
+  const t = tasks.find(t => t.id === id);
+  if (!t) return;
+
+  const btn = document.querySelector(`[data-push="${id}"]`);
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+
+  // Build event times
+  const start = t.dueDate ? new Date(t.dueDate) : new Date();
+  const end = new Date(start.getTime() + (t.duration || 60) * 60000);
+
+  const event = {
+    summary: t.text,
+    description: `Created in TaskFlow`,
+    start: { dateTime: start.toISOString() },
+    end: { dateTime: end.toISOString() },
+  };
+
+  try {
+    const res = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId || 'primary')}/events`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(event),
+      }
+    );
+
+    if (!res.ok) {
+      const err = await res.json();
+      if (err.error?.status === 'UNAUTHENTICATED') {
+        accessToken = null; updateGCalButton(false);
+        showToast('Session expired — reconnect', true);
+      } else {
+        showToast('GCal error: ' + (err.error?.message || 'unknown'), true);
+      }
+      if (btn) { btn.disabled = false; btn.textContent = '→ gcal'; }
+      return;
+    }
+
+    const data = await res.json();
+    t.gcalEventId = data.id;
+    save();
+    render();
+    showToast('Added to Google Calendar ✓');
+  } catch (e) {
+    showToast('Network error', true);
+    if (btn) { btn.disabled = false; btn.textContent = '→ gcal'; }
+  }
+}
+
+// ── Render ─────────────────────────────────────────────────────────────
+function setFilter(f, el) {
+  currentFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  render();
+}
+
+function render() {
+  const list = document.getElementById('taskList');
+  const empty = document.getElementById('emptyState');
+  const stats = document.getElementById('stats');
+
+  const total = tasks.length;
+  const done = tasks.filter(t => t.done).length;
+  const gcal = tasks.filter(t => t.gcalEventId).length;
+  stats.innerHTML = `<span>${total}</span> tasks · <span>${done}</span> done · <span>${gcal}</span> in gcal`;
+
+  const filtered = tasks.filter(t => {
+    if (currentFilter === 'active') return !t.done;
+    if (currentFilter === 'done') return t.done;
+    if (currentFilter === 'gcal') return !!t.gcalEventId;
+    return true;
+  });
+
+  if (!filtered.length) {
+    list.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  list.innerHTML = filtered.map(t => {
+    const dateStr = t.dueDate
+      ? new Date(t.dueDate).toLocaleString('en-AU', { dateStyle: 'short', timeStyle: 'short' })
+      : '';
+
+    const gcalSection = t.gcalEventId
+      ? `<span class="gcal-badge">GCal ✓</span>`
+      : accessToken
+        ? `<button class="gcal-push-btn" data-push="${t.id}" onclick="pushToGCal('${t.id}')">→ gcal</button>`
+        : `<button class="gcal-push-btn" onclick="authenticate()" title="Connect GCal first">→ gcal</button>`;
+
+    return `
+      <li class="task-item${t.done ? ' done' : ''}">
+        <div class="task-check${t.done ? ' checked' : ''}" onclick="toggleDone('${t.id}')"></div>
+        <div class="task-body">
+          <div class="task-text">${escapeHtml(t.text)}</div>
+          <div class="task-meta">
+            ${dateStr ? `<span class="task-date">${dateStr} · ${t.duration}min</span>` : ''}
+            ${gcalSection}
+          </div>
+        </div>
+        <button class="task-delete" onclick="deleteTask('${t.id}')" title="Delete">×</button>
+      </li>`;
+  }).join('');
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function save() {
+  localStorage.setItem('tf_tasks', JSON.stringify(tasks));
+}
+
+// ── Toast ──────────────────────────────────────────────────────────────
+let toastTimer;
+function showToast(msg, isError = false) {
+  const t = document.getElementById('toast');
+  clearTimeout(toastTimer);
+  t.textContent = msg;
+  t.className = 'toast show' + (isError ? ' error' : '');
+  toastTimer = setTimeout(() => { t.classList.remove('show'); }, 3000);
+}
+
+// ── Init ───────────────────────────────────────────────────────────────
+window.addEventListener('load', () => {
+  // Wait for GSI to load
+  const tryInit = setInterval(() => {
+    if (window.google?.accounts?.oauth2 && config.clientId) {
+      clearInterval(tryInit);
+      initGoogleAuth();
+    } else if (!config.clientId) {
+      clearInterval(tryInit);
+    }
+  }, 200);
+  render();
+});
+</script>
+</body>
+</html>
