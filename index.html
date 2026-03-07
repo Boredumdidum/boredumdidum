@@ -473,6 +473,27 @@
   <ul class="task-list" id="taskList"></ul>
   <div class="empty" id="emptyState" style="display:none">No tasks here yet.</div>
 
+  <!-- Google Calendar Section -->
+  <section class="gcal-section" id="gcalSection" style="margin-top:28px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+      <h3 style="font-family:Fraunces, serif; font-weight:300; margin:0;">Google Calendar</h3>
+      <div>
+        <button class="gcal-btn" id="refreshGCalBtn" onclick="fetchCalendarEvents()">Refresh</button>
+        <button class="gcal-btn" id="createEventToggle" onclick="toggleCreateEvent()">+ Event</button>
+      </div>
+    </div>
+    <div id="createEventPanel" style="display:none; margin-top:12px; background:white; border:1.5px solid var(--line); padding:12px;">
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <input class="config-input" id="evTitle" placeholder="Title" />
+        <input class="config-input" id="evStart" type="datetime-local" />
+        <input class="config-input" id="evEnd" type="datetime-local" />
+        <input class="config-input" id="evDesc" placeholder="Description" />
+        <button class="config-save" onclick="createCalendarEvent()">Create</button>
+      </div>
+    </div>
+    <ul id="gcalEventsList" style="list-style:none; margin-top:12px; padding:0;"></ul>
+  </section>
+
 </div>
 
 <div class="toast" id="toast"></div>
@@ -535,6 +556,8 @@ function initGoogleAuth() {
       accessToken = resp.access_token;
       updateGCalButton(true);
       showToast('Connected to Google Calendar ✓');
+      // After authenticating, fetch the user's upcoming events
+      fetchCalendarEvents();
     },
   });
 
@@ -650,6 +673,102 @@ async function pushToGCal(id) {
   } catch (e) {
     showToast('Network error', true);
     if (btn) { btn.disabled = false; btn.textContent = '→ gcal'; }
+  }
+}
+
+// ── Google Calendar: fetch & create events ─────────────────────────────
+async function fetchCalendarEvents() {
+  const listEl = document.getElementById('gcalEventsList');
+  listEl.innerHTML = '<li style="color:var(--muted)">Loading…</li>';
+  if (!accessToken) { listEl.innerHTML = '<li style="color:var(--muted)">Not connected</li>'; return; }
+
+  try {
+    const res = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId || 'primary')}/events?orderBy=startTime&singleEvents=true&timeMin=${encodeURIComponent(new Date().toISOString())}&maxResults=25`
+      , { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+
+    if (!res.ok) {
+      const err = await res.json();
+      showToast('GCal fetch error: ' + (err.error?.message || res.statusText), true);
+      listEl.innerHTML = '';
+      return;
+    }
+
+    const data = await res.json();
+    renderGCalEvents(data.items || []);
+  } catch (e) {
+    listEl.innerHTML = '';
+    showToast('Network error fetching events', true);
+  }
+}
+
+function renderGCalEvents(items) {
+  const listEl = document.getElementById('gcalEventsList');
+  if (!items.length) { listEl.innerHTML = '<li class="empty">No upcoming events.</li>'; return; }
+
+  listEl.innerHTML = items.map(ev => {
+    const start = ev.start?.dateTime || ev.start?.date || '';
+    const ds = start ? new Date(start).toLocaleString('en-AU', { dateStyle: 'short', timeStyle: 'short' }) : '';
+    const desc = ev.description ? `<div style="font-size:0.8rem;color:var(--muted);">${escapeHtml(ev.description)}</div>` : '';
+    return `<li style="padding:10px 0; border-bottom:1px solid var(--line);">
+      <div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
+        <div style="min-width:0">
+          <div style="font-weight:600">${escapeHtml(ev.summary || '(No title)')}</div>
+          <div style="font-size:0.8rem;color:var(--muted)">${ds}</div>
+          ${desc}
+        </div>
+        <div style="text-align:right; font-size:0.8rem; color:var(--muted)">${ev.organizer?.email ? escapeHtml(ev.organizer.email) : ''}</div>
+      </div>
+    </li>`;
+  }).join('');
+}
+
+function toggleCreateEvent() {
+  const p = document.getElementById('createEventPanel');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+}
+
+async function createCalendarEvent() {
+  if (!accessToken) { authenticate(); return; }
+  const title = document.getElementById('evTitle').value.trim();
+  const start = document.getElementById('evStart').value;
+  const end = document.getElementById('evEnd').value;
+  const desc = document.getElementById('evDesc').value.trim();
+  if (!title || !start || !end) { showToast('Please provide title, start and end', true); return; }
+
+  const event = {
+    summary: title,
+    description: desc,
+    start: { dateTime: new Date(start).toISOString() },
+    end: { dateTime: new Date(end).toISOString() },
+  };
+
+  try {
+    const res = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId || 'primary')}/events`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(event),
+      }
+    );
+
+    if (!res.ok) {
+      const err = await res.json();
+      showToast('Create error: ' + (err.error?.message || res.statusText), true);
+      return;
+    }
+
+    showToast('Event created ✓');
+    document.getElementById('evTitle').value = '';
+    document.getElementById('evStart').value = '';
+    document.getElementById('evEnd').value = '';
+    document.getElementById('evDesc').value = '';
+    document.getElementById('createEventPanel').style.display = 'none';
+    fetchCalendarEvents();
+  } catch (e) {
+    showToast('Network error creating event', true);
   }
 }
 
