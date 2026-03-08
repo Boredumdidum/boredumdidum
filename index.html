@@ -167,6 +167,14 @@
 
   .config-input:focus { border-color: var(--ink); }
 
+  /* Cap credential/ID inputs so they don't overflow narrow columns */
+  #clientIdInput, #calendarIdInput {
+    font-size: 0.68rem;
+    text-overflow: ellipsis;
+  }
+
+  #taskDuration { width: 80px; }
+
   .config-save {
     font-family: 'DM Mono', monospace;
     font-size: 0.75rem;
@@ -470,12 +478,12 @@
   <div class="config-panel" id="configPanel">
     <h3>Google Calendar API Setup</h3>
     <div class="config-row">
-      <input class="config-input" id="clientIdInput" type="text" placeholder="OAuth 2.0 Client ID (ends in .apps.googleusercontent.com)" />
+      <input class="config-input" id="clientIdInput" type="text" placeholder="OAuth 2.0 Client ID (ends in .apps.googleusercontent.com)" maxlength="120" spellcheck="false" autocomplete="off" />
     </div>
     <div style="margin-bottom:6px; font-size:0.65rem; color:var(--muted); letter-spacing:0.04em; text-transform:uppercase;">Calendars to sync</div>
     <div id="calendarIdList" style="display:flex; flex-direction:column; gap:5px; margin-bottom:8px;"></div>
     <div class="config-row">
-      <input class="config-input" id="calendarIdInput" type="text" placeholder="Calendar ID (e.g. primary or abc@group.calendar.google.com)" />
+      <input class="config-input" id="calendarIdInput" type="text" placeholder="Calendar ID (e.g. primary or abc@group.calendar.google.com)" maxlength="120" spellcheck="false" autocomplete="off" />
       <button class="config-save" onclick="addCalendarId()" style="display:flex;align-items:center;gap:4px;white-space:nowrap;"><i data-lucide="plus" style="width:12px;height:12px;"></i> Add</button>
     </div>
     <div class="config-row" style="margin-top:4px;">
@@ -491,10 +499,10 @@
 
   <!-- Add Task -->
   <div class="add-task">
-    <input type="text" id="taskInput" placeholder="What needs doing…" onkeydown="if(event.key==='Enter') addTask()" />
+    <input type="text" id="taskInput" placeholder="What needs doing…" maxlength="200" onkeydown="if(event.key==='Enter') addTask()" />
     <div class="task-options">
       <input type="datetime-local" id="taskDate" title="Due date/time" />
-      <input type="number" id="taskDuration" min="15" step="15" placeholder="mins (e.g. 30)" title="Duration in minutes" />
+      <input type="number" id="taskDuration" min="15" max="999" step="15" placeholder="mins (e.g. 30)" title="Duration in minutes" />
     </div>
     <button class="add-btn" onclick="addTask()" style="display:flex;align-items:center;justify-content:center;"><i data-lucide="plus" style="width:18px;height:18px;"></i></button>
   </div>
@@ -532,10 +540,10 @@
     <div id="createEventPanel" style="display:none; margin-bottom:16px; background:white; border:1.5px solid var(--ink); padding:16px;">
       <div style="font-family:Fraunces,serif; font-weight:300; font-style:italic; margin-bottom:10px; font-size:0.9rem;">New event</div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-        <input class="config-input" id="evTitle" placeholder="Title" style="grid-column:1/-1;" />
+        <input class="config-input" id="evTitle" placeholder="Title" maxlength="200" style="grid-column:1/-1;" />
         <input class="config-input" id="evStart" type="datetime-local" />
         <input class="config-input" id="evEnd" type="datetime-local" />
-        <input class="config-input" id="evDesc" placeholder="Description (optional)" style="grid-column:1/-1;" />
+        <input class="config-input" id="evDesc" placeholder="Description (optional)" maxlength="500" style="grid-column:1/-1;" />
         <div style="grid-column:1/-1; display:flex; gap:8px; justify-content:flex-end;">
           <button class="gcal-btn" onclick="toggleCreateEvent()" style="display:flex;align-items:center;gap:5px;"><i data-lucide="x" style="width:12px;height:12px;"></i> Cancel</button>
           <button class="config-save" onclick="createCalendarEvent()" style="display:flex;align-items:center;gap:5px;"><i data-lucide="calendar-plus" style="width:12px;height:12px;"></i> Create Event</button>
