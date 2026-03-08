@@ -456,9 +456,14 @@
 
   <header>
     <div class="logo">Task<span>Flow</span></div>
-    <button class="gcal-btn" id="gcalBtn" onclick="toggleConfig()">
-      <span id="gcalStatus">⚙ Configure GCal</span>
-    </button>
+    <div style="display:flex;gap:0;">
+      <button class="gcal-btn" id="gcalBtn" onclick="toggleAuth()" style="border-right:none;">
+        <span id="gcalStatus" style="display:flex;align-items:center;gap:6px;"></span>
+      </button>
+      <button class="gcal-btn" id="configGearBtn" onclick="openConfig()" title="Edit calendar settings" style="padding:8px 10px; border-left:1px solid currentColor; display:flex; align-items:center;">
+        <i data-lucide="settings" style="width:14px;height:14px;"></i>
+      </button>
+    </div>
   </header>
 
   <!-- Config Panel -->
@@ -471,10 +476,10 @@
     <div id="calendarIdList" style="display:flex; flex-direction:column; gap:5px; margin-bottom:8px;"></div>
     <div class="config-row">
       <input class="config-input" id="calendarIdInput" type="text" placeholder="Calendar ID (e.g. primary or abc@group.calendar.google.com)" />
-      <button class="config-save" onclick="addCalendarId()">+ Add</button>
+      <button class="config-save" onclick="addCalendarId()" style="display:flex;align-items:center;gap:4px;white-space:nowrap;"><i data-lucide="plus" style="width:12px;height:12px;"></i> Add</button>
     </div>
     <div class="config-row" style="margin-top:4px;">
-      <button class="config-save" onclick="saveConfig()" style="width:100%;">Save &amp; Connect</button>
+      <button class="config-save" onclick="saveConfig()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px;"><i data-lucide="save" style="width:12px;height:12px;"></i> Save &amp; Connect</button>
     </div>
     <p class="config-note">
       1. Go to <a href="https://console.cloud.google.com" target="_blank">Google Cloud Console</a> → APIs &amp; Services → Credentials<br>
@@ -491,7 +496,7 @@
       <input type="datetime-local" id="taskDate" title="Due date/time" />
       <input type="number" id="taskDuration" min="15" step="15" placeholder="mins (e.g. 30)" title="Duration in minutes" />
     </div>
-    <button class="add-btn" onclick="addTask()">+</button>
+    <button class="add-btn" onclick="addTask()" style="display:flex;align-items:center;justify-content:center;"><i data-lucide="plus" style="width:18px;height:18px;"></i></button>
   </div>
 
   <!-- Filters -->
@@ -517,8 +522,8 @@
     <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px;">
       <h3 style="font-family:Fraunces, serif; font-weight:300; font-size:1.3rem; margin:0;">Google Calendar</h3>
       <div style="display:flex; gap:6px;">
-        <button class="gcal-btn" id="refreshGCalBtn" onclick="fetchCalendarEvents()">Refresh</button>
-        <button class="gcal-btn" id="createEventToggle" onclick="toggleCreateEvent()">+ Event</button>
+        <button class="gcal-btn" id="refreshGCalBtn" onclick="fetchCalendarEvents()" style="display:flex;align-items:center;gap:5px;"><i data-lucide="refresh-cw" style="width:12px;height:12px;"></i> Refresh</button>
+        <button class="gcal-btn" id="createEventToggle" onclick="toggleCreateEvent()" style="display:flex;align-items:center;gap:5px;"><i data-lucide="plus" style="width:12px;height:12px;"></i> Event</button>
       </div>
     </div>
     <div id="calLegend" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; font-size:0.62rem; font-family:'DM Mono',monospace; letter-spacing:0.04em;"></div>
@@ -532,8 +537,8 @@
         <input class="config-input" id="evEnd" type="datetime-local" />
         <input class="config-input" id="evDesc" placeholder="Description (optional)" style="grid-column:1/-1;" />
         <div style="grid-column:1/-1; display:flex; gap:8px; justify-content:flex-end;">
-          <button class="gcal-btn" onclick="toggleCreateEvent()">Cancel</button>
-          <button class="config-save" onclick="createCalendarEvent()">Create Event</button>
+          <button class="gcal-btn" onclick="toggleCreateEvent()" style="display:flex;align-items:center;gap:5px;"><i data-lucide="x" style="width:12px;height:12px;"></i> Cancel</button>
+          <button class="config-save" onclick="createCalendarEvent()" style="display:flex;align-items:center;gap:5px;"><i data-lucide="calendar-plus" style="width:12px;height:12px;"></i> Create Event</button>
         </div>
       </div>
     </div>
@@ -542,9 +547,9 @@
     <div id="calendarWidget">
       <!-- Month nav -->
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
-        <button class="gcal-btn" onclick="shiftMonth(-1)" style="padding:6px 12px;">‹</button>
+        <button class="gcal-btn" onclick="shiftMonth(-1)" style="padding:6px 10px; display:flex; align-items:center;"><i data-lucide="chevron-left" style="width:14px;height:14px;"></i></button>
         <div id="calMonthLabel" style="font-family:Fraunces,serif; font-size:1rem; font-weight:300; letter-spacing:0.04em;"></div>
-        <button class="gcal-btn" onclick="shiftMonth(1)" style="padding:6px 12px;">›</button>
+        <button class="gcal-btn" onclick="shiftMonth(1)" style="padding:6px 10px; display:flex; align-items:center;"><i data-lucide="chevron-right" style="width:14px;height:14px;"></i></button>
       </div>
       <!-- Day headers -->
       <div id="calDayHeaders" style="display:grid; grid-template-columns:repeat(7,1fr); gap:2px; margin-bottom:2px;"></div>
@@ -554,10 +559,10 @@
       <div id="dayPopover" style="display:none; margin-top:12px; background:white; border:1.5px solid var(--ink); padding:14px;">
         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
           <div id="popoverDate" style="font-family:Fraunces,serif; font-size:0.85rem; font-style:italic;"></div>
-          <button onclick="document.getElementById('dayPopover').style.display='none'" style="background:none;border:none;cursor:pointer;font-size:1rem;color:var(--muted);">×</button>
+          <button onclick="document.getElementById('dayPopover').style.display='none'" style="background:none;border:none;cursor:pointer;color:var(--muted);display:flex;align-items:center;"><i data-lucide="x" style="width:14px;height:14px;"></i></button>
         </div>
         <ul id="popoverEvents" style="list-style:none; padding:0; margin:0;"></ul>
-        <button class="config-save" style="margin-top:10px; font-size:0.65rem;" onclick="prefillNewEvent()">+ Add event on this day</button>
+        <button class="config-save" style="margin-top:10px; font-size:0.65rem; display:flex;align-items:center;gap:4px;" onclick="prefillNewEvent()"><i data-lucide="plus" style="width:11px;height:11px;"></i> Add event on this day</button>
       </div>
     </div>
 
@@ -565,7 +570,7 @@
     <div id="dayTimeline" style="margin-top:32px; display:none;">
       <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px; border-top:1.5px solid var(--ink); padding-top:14px;">
         <div id="timelineLabel" style="font-family:Fraunces,serif; font-weight:300; font-size:1rem; font-style:italic; color:var(--ink);"></div>
-        <button class="gcal-btn" style="font-size:0.6rem; padding:4px 10px;" onclick="prefillNewEvent()">+ Add event</button>
+        <button class="gcal-btn" style="font-size:0.6rem; padding:4px 10px; display:flex;align-items:center;gap:4px;" onclick="prefillNewEvent()"><i data-lucide="plus" style="width:11px;height:11px;"></i> Add event</button>
       </div>
       <div id="timelineGrid" style="position:relative; font-family:'DM Mono',monospace;">
         <!-- hour rows injected by JS -->
@@ -585,6 +590,7 @@
 
 <!-- Google Identity Services -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
 
 <script>
 // ── State ──────────────────────────────────────────────────────────────
@@ -622,7 +628,7 @@ function renderCalendarIdList() {
     `<div style="display:flex;align-items:center;gap:6px;font-size:0.7rem;padding:4px 8px;background:white;border:1px solid var(--line);">
       <span style="width:8px;height:8px;border-radius:50%;background:${CAL_COLORS[i % CAL_COLORS.length]};flex-shrink:0;"></span>
       <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(id)}</span>
-      <button onclick="removeCalendarId('${escapeHtml(id)}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:0.9rem;padding:0 2px;">×</button>
+      <button onclick="removeCalendarId('${escapeHtml(id)}')" style="background:none;border:none;color:var(--muted);cursor:pointer;padding:0 2px;display:flex;align-items:center;"><i data-lucide="x" style="width:12px;height:12px;"></i></button>
     </div>`
   ).join('');
 }
@@ -641,22 +647,23 @@ function saveConfig() {
   showToast('Config saved — click Connect to authenticate');
 }
 
-function toggleConfig() {
-  const panel = document.getElementById('configPanel');
-  if (config.clientId) {
-    if (!accessToken) {
-      authenticate();
-    } else {
-      accessToken = null;
-      updateGCalButton(false);
-      showToast('Disconnected from Google Calendar');
-    }
-    return;
+function toggleAuth() {
+  if (!config.clientId) { openConfig(); return; }
+  if (!accessToken) {
+    authenticate();
+  } else {
+    accessToken = null;
+    updateGCalButton(false);
+    showToast('Disconnected from Google Calendar');
   }
+}
+
+function openConfig() {
+  const panel = document.getElementById('configPanel');
+  const isOpen = panel.classList.contains('open');
   panel.classList.toggle('open');
-  if (panel.classList.contains('open')) {
+  if (!isOpen) {
     if (config.clientId) document.getElementById('clientIdInput').value = config.clientId;
-    // Populate pending list from saved config
     pendingCalendarIds = config.calendarIds ? [...config.calendarIds]
       : config.calendarId ? [config.calendarId] : ['primary'];
     renderCalendarIdList();
@@ -699,11 +706,14 @@ function updateGCalButton(connected) {
   const status = document.getElementById('gcalStatus');
   if (connected) {
     btn.classList.add('connected');
-    status.innerHTML = '<span class="gcal-dot"></span> GCal Connected';
+    status.innerHTML = '<i data-lucide="calendar-check" style="width:13px;height:13px;"></i> GCal Connected';
   } else {
     btn.classList.remove('connected');
-    status.textContent = config.clientId ? '⚡ Connect GCal' : '⚙ Configure GCal';
+    status.innerHTML = config.clientId
+      ? '<i data-lucide="calendar" style="width:13px;height:13px;"></i> Connect GCal'
+      : '<i data-lucide="calendar" style="width:13px;height:13px;"></i> Configure GCal';
   }
+  if (window.lucide) lucide.createIcons();
   render();
 }
 
@@ -1199,10 +1209,10 @@ function render() {
       : '';
 
     const gcalSection = t.gcalEventId
-      ? `<span class="gcal-badge">GCal ✓</span>`
+      ? `<span class="gcal-badge" style="display:inline-flex;align-items:center;gap:3px;"><i data-lucide="check" style="width:9px;height:9px;"></i> GCal</span>`
       : accessToken
-        ? `<button class="gcal-push-btn" data-push="${t.id}" onclick="pushToGCal('${t.id}')">→ gcal</button>`
-        : `<button class="gcal-push-btn" onclick="authenticate()" title="Connect GCal first">→ gcal</button>`;
+        ? `<button class="gcal-push-btn" data-push="${t.id}" onclick="pushToGCal('${t.id}')" style="display:inline-flex;align-items:center;gap:3px;"><i data-lucide="calendar-plus" style="width:10px;height:10px;"></i> gcal</button>`
+        : `<button class="gcal-push-btn" onclick="authenticate()" title="Connect GCal first" style="display:inline-flex;align-items:center;gap:3px;"><i data-lucide="calendar-plus" style="width:10px;height:10px;"></i> gcal</button>`;
 
     return `
       <li class="task-item${t.done ? ' done' : ''}">
@@ -1214,9 +1224,10 @@ function render() {
             ${gcalSection}
           </div>
         </div>
-        <button class="task-delete" onclick="deleteTask('${t.id}')" title="Delete">×</button>
+        <button class="task-delete" onclick="deleteTask('${t.id}')" title="Delete" style="display:flex;align-items:center;"><i data-lucide="x" style="width:13px;height:13px;"></i></button>
       </li>`;
   }).join('');
+  if (window.lucide) lucide.createIcons();
 }
 
 function escapeHtml(s) {
@@ -1250,6 +1261,7 @@ window.addEventListener('load', () => {
   }, 200);
   render();
   renderCalendarGrid(); // show empty calendar immediately
+  if (window.lucide) lucide.createIcons();
 });
 </script>
 </body>
