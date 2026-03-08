@@ -474,24 +474,52 @@
   <div class="empty" id="emptyState" style="display:none">No tasks here yet.</div>
 
   <!-- Google Calendar Section -->
-  <section class="gcal-section" id="gcalSection" style="margin-top:28px;">
-    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-      <h3 style="font-family:Fraunces, serif; font-weight:300; margin:0;">Google Calendar</h3>
-      <div>
+  <section class="gcal-section" id="gcalSection" style="margin-top:40px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px;">
+      <h3 style="font-family:Fraunces, serif; font-weight:300; font-size:1.3rem; margin:0;">Google Calendar</h3>
+      <div style="display:flex; gap:6px;">
         <button class="gcal-btn" id="refreshGCalBtn" onclick="fetchCalendarEvents()">Refresh</button>
         <button class="gcal-btn" id="createEventToggle" onclick="toggleCreateEvent()">+ Event</button>
       </div>
     </div>
-    <div id="createEventPanel" style="display:none; margin-top:12px; background:white; border:1.5px solid var(--line); padding:12px;">
-      <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <input class="config-input" id="evTitle" placeholder="Title" />
+
+    <!-- Create Event Panel -->
+    <div id="createEventPanel" style="display:none; margin-bottom:16px; background:white; border:1.5px solid var(--ink); padding:16px;">
+      <div style="font-family:Fraunces,serif; font-weight:300; font-style:italic; margin-bottom:10px; font-size:0.9rem;">New event</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <input class="config-input" id="evTitle" placeholder="Title" style="grid-column:1/-1;" />
         <input class="config-input" id="evStart" type="datetime-local" />
         <input class="config-input" id="evEnd" type="datetime-local" />
-        <input class="config-input" id="evDesc" placeholder="Description" />
-        <button class="config-save" onclick="createCalendarEvent()">Create</button>
+        <input class="config-input" id="evDesc" placeholder="Description (optional)" style="grid-column:1/-1;" />
+        <div style="grid-column:1/-1; display:flex; gap:8px; justify-content:flex-end;">
+          <button class="gcal-btn" onclick="toggleCreateEvent()">Cancel</button>
+          <button class="config-save" onclick="createCalendarEvent()">Create Event</button>
+        </div>
       </div>
     </div>
-    <ul id="gcalEventsList" style="list-style:none; margin-top:12px; padding:0;"></ul>
+
+    <!-- Calendar Grid -->
+    <div id="calendarWidget">
+      <!-- Month nav -->
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+        <button class="gcal-btn" onclick="shiftMonth(-1)" style="padding:6px 12px;">‹</button>
+        <div id="calMonthLabel" style="font-family:Fraunces,serif; font-size:1rem; font-weight:300; letter-spacing:0.04em;"></div>
+        <button class="gcal-btn" onclick="shiftMonth(1)" style="padding:6px 12px;">›</button>
+      </div>
+      <!-- Day headers -->
+      <div id="calDayHeaders" style="display:grid; grid-template-columns:repeat(7,1fr); gap:2px; margin-bottom:2px;"></div>
+      <!-- Day cells -->
+      <div id="calGrid" style="display:grid; grid-template-columns:repeat(7,1fr); gap:2px;"></div>
+      <!-- Event detail popover -->
+      <div id="dayPopover" style="display:none; margin-top:12px; background:white; border:1.5px solid var(--ink); padding:14px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+          <div id="popoverDate" style="font-family:Fraunces,serif; font-size:0.85rem; font-style:italic;"></div>
+          <button onclick="document.getElementById('dayPopover').style.display='none'" style="background:none;border:none;cursor:pointer;font-size:1rem;color:var(--muted);">×</button>
+        </div>
+        <ul id="popoverEvents" style="list-style:none; padding:0; margin:0;"></ul>
+        <button class="config-save" style="margin-top:10px; font-size:0.65rem;" onclick="prefillNewEvent()">+ Add event on this day</button>
+      </div>
+    </div>
   </section>
 
 </div>
@@ -676,52 +704,164 @@ async function pushToGCal(id) {
   }
 }
 
+// ── Calendar grid state ────────────────────────────────────────────────
+let calEvents = [];
+let calViewDate = new Date(); // month being shown
+let selectedDay = null;       // date string YYYY-MM-DD
+
 // ── Google Calendar: fetch & create events ─────────────────────────────
 async function fetchCalendarEvents() {
-  const listEl = document.getElementById('gcalEventsList');
-  listEl.innerHTML = '<li style="color:var(--muted)">Loading…</li>';
-  if (!accessToken) { listEl.innerHTML = '<li style="color:var(--muted)">Not connected</li>'; return; }
+  if (!accessToken) { renderCalendarGrid(); return; }
+
+  // Fetch events spanning the visible month (with a little buffer)
+  const y = calViewDate.getFullYear(), m = calViewDate.getMonth();
+  const tMin = new Date(y, m, 1).toISOString();
+  const tMax = new Date(y, m + 1, 1).toISOString();
 
   try {
     const res = await fetch(
-      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId || 'primary')}/events?orderBy=startTime&singleEvents=true&timeMin=${encodeURIComponent(new Date().toISOString())}&maxResults=25`
-      , { headers: { Authorization: `Bearer ${accessToken}` } }
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId || 'primary')}/events?orderBy=startTime&singleEvents=true&timeMin=${encodeURIComponent(tMin)}&timeMax=${encodeURIComponent(tMax)}&maxResults=250`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
     );
 
     if (!res.ok) {
       const err = await res.json();
       showToast('GCal fetch error: ' + (err.error?.message || res.statusText), true);
-      listEl.innerHTML = '';
       return;
     }
 
     const data = await res.json();
-    renderGCalEvents(data.items || []);
+    calEvents = data.items || [];
+    renderCalendarGrid();
   } catch (e) {
-    listEl.innerHTML = '';
     showToast('Network error fetching events', true);
   }
 }
 
-function renderGCalEvents(items) {
-  const listEl = document.getElementById('gcalEventsList');
-  if (!items.length) { listEl.innerHTML = '<li class="empty">No upcoming events.</li>'; return; }
+function renderCalendarGrid() {
+  const y = calViewDate.getFullYear(), m = calViewDate.getMonth();
+  document.getElementById('calMonthLabel').textContent =
+    new Date(y, m, 1).toLocaleString('en-AU', { month: 'long', year: 'numeric' });
 
-  listEl.innerHTML = items.map(ev => {
-    const start = ev.start?.dateTime || ev.start?.date || '';
-    const ds = start ? new Date(start).toLocaleString('en-AU', { dateStyle: 'short', timeStyle: 'short' }) : '';
-    const desc = ev.description ? `<div style="font-size:0.8rem;color:var(--muted);">${escapeHtml(ev.description)}</div>` : '';
-    return `<li style="padding:10px 0; border-bottom:1px solid var(--line);">
-      <div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
-        <div style="min-width:0">
-          <div style="font-weight:600">${escapeHtml(ev.summary || '(No title)')}</div>
-          <div style="font-size:0.8rem;color:var(--muted)">${ds}</div>
-          ${desc}
+  // Day headers
+  const dayHeaders = document.getElementById('calDayHeaders');
+  const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  dayHeaders.innerHTML = dayNames.map(d =>
+    `<div style="text-align:center;font-size:0.6rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);padding:4px 0;">${d}</div>`
+  ).join('');
+
+  // Build event lookup by date key YYYY-MM-DD
+  const eventMap = {};
+  calEvents.forEach(ev => {
+    const raw = ev.start?.dateTime || ev.start?.date || '';
+    if (!raw) return;
+    const key = raw.slice(0, 10);
+    if (!eventMap[key]) eventMap[key] = [];
+    eventMap[key].push(ev);
+  });
+
+  // Grid cells
+  const firstDay = new Date(y, m, 1).getDay(); // 0=Sun
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const todayKey = new Date().toISOString().slice(0, 10);
+
+  const grid = document.getElementById('calGrid');
+  let html = '';
+
+  // Leading empty cells
+  for (let i = 0; i < firstDay; i++) {
+    html += `<div style="min-height:60px;"></div>`;
+  }
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const key = `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const evs = eventMap[key] || [];
+    const isToday = key === todayKey;
+    const isSelected = key === selectedDay;
+    const hasEvs = evs.length > 0;
+
+    const dots = evs.slice(0, 3).map(() =>
+      `<span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--gcal);margin:0 1px;"></span>`
+    ).join('');
+
+    html += `<div onclick="selectDay('${key}')"
+      style="min-height:60px;padding:6px 5px;border:1.5px solid ${isSelected ? 'var(--ink)' : isToday ? 'var(--accent)' : 'var(--line)'};
+             background:${isSelected ? 'var(--ink)' : isToday ? '#fff8f6' : 'white'};
+             cursor:pointer;transition:all 0.1s;position:relative;"
+      onmouseover="this.style.borderColor='var(--ink)'"
+      onmouseout="this.style.borderColor='${isSelected ? 'var(--ink)' : isToday ? 'var(--accent)' : 'var(--line)'}'">
+      <div style="font-family:'DM Mono',monospace;font-size:0.7rem;font-weight:${isToday?'500':'400'};
+                  color:${isSelected ? 'var(--paper)' : isToday ? 'var(--accent)' : 'var(--ink)'};">${d}</div>
+      ${hasEvs ? `<div style="margin-top:4px;">${dots}</div>` : ''}
+      ${evs.length > 0 ? `<div style="font-size:0.55rem;margin-top:2px;color:${isSelected?'var(--paper)':'var(--muted)'};line-height:1.3;overflow:hidden;max-height:28px;">${escapeHtml(evs[0].summary||'')}</div>` : ''}
+    </div>`;
+  }
+
+  grid.innerHTML = html;
+}
+
+function selectDay(dateKey) {
+  selectedDay = dateKey;
+  renderCalendarGrid();
+
+  // Show popover
+  const popover = document.getElementById('dayPopover');
+  const label = document.getElementById('popoverDate');
+  const list = document.getElementById('popoverEvents');
+
+  const d = new Date(dateKey + 'T00:00:00');
+  label.textContent = d.toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+
+  // Events for this day
+  const dayEvs = calEvents.filter(ev => {
+    const raw = ev.start?.dateTime || ev.start?.date || '';
+    return raw.slice(0, 10) === dateKey;
+  });
+
+  if (!dayEvs.length) {
+    list.innerHTML = `<li style="color:var(--muted);font-size:0.75rem;padding:6px 0;">No events</li>`;
+  } else {
+    list.innerHTML = dayEvs.map(ev => {
+      const start = ev.start?.dateTime || ev.start?.date || '';
+      const timeStr = ev.start?.dateTime
+        ? new Date(start).toLocaleTimeString('en-AU', { hour:'2-digit', minute:'2-digit' })
+        : 'All day';
+      const endRaw = ev.end?.dateTime || ev.end?.date || '';
+      const endStr = ev.end?.dateTime
+        ? ' – ' + new Date(endRaw).toLocaleTimeString('en-AU', { hour:'2-digit', minute:'2-digit' })
+        : '';
+      return `<li style="padding:7px 0; border-bottom:1px solid var(--line); display:flex; gap:10px; align-items:flex-start;">
+        <div style="width:6px;height:6px;border-radius:50%;background:var(--gcal);flex-shrink:0;margin-top:5px;"></div>
+        <div>
+          <div style="font-size:0.8rem; font-family:'Fraunces',serif; font-weight:300;">${escapeHtml(ev.summary || '(No title)')}</div>
+          <div style="font-size:0.65rem; color:var(--muted);">${timeStr}${endStr}</div>
+          ${ev.description ? `<div style="font-size:0.65rem;color:var(--muted);margin-top:2px;">${escapeHtml(ev.description)}</div>` : ''}
         </div>
-        <div style="text-align:right; font-size:0.8rem; color:var(--muted)">${ev.organizer?.email ? escapeHtml(ev.organizer.email) : ''}</div>
-      </div>
-    </li>`;
-  }).join('');
+      </li>`;
+    }).join('');
+  }
+
+  popover.style.display = 'block';
+}
+
+function shiftMonth(delta) {
+  calViewDate.setMonth(calViewDate.getMonth() + delta);
+  calEvents = [];
+  document.getElementById('dayPopover').style.display = 'none';
+  selectedDay = null;
+  renderCalendarGrid();
+  fetchCalendarEvents();
+}
+
+function prefillNewEvent() {
+  if (!selectedDay) return;
+  const panel = document.getElementById('createEventPanel');
+  panel.style.display = 'block';
+  // Pre-fill start as 9am on selected day
+  document.getElementById('evStart').value = selectedDay + 'T09:00';
+  document.getElementById('evEnd').value = selectedDay + 'T10:00';
+  document.getElementById('evTitle').focus();
+  document.getElementById('dayPopover').style.display = 'none';
 }
 
 function toggleCreateEvent() {
@@ -761,10 +901,7 @@ async function createCalendarEvent() {
     }
 
     showToast('Event created ✓');
-    document.getElementById('evTitle').value = '';
-    document.getElementById('evStart').value = '';
-    document.getElementById('evEnd').value = '';
-    document.getElementById('evDesc').value = '';
+    ['evTitle','evStart','evEnd','evDesc'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('createEventPanel').style.display = 'none';
     fetchCalendarEvents();
   } catch (e) {
@@ -860,6 +997,7 @@ window.addEventListener('load', () => {
     }
   }, 200);
   render();
+  renderCalendarGrid(); // show empty calendar immediately
 });
 </script>
 </body>
