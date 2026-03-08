@@ -563,34 +563,44 @@
       <div id="calDayHeaders" style="display:grid; grid-template-columns:repeat(7,1fr); gap:2px; margin-bottom:2px;"></div>
       <!-- Day cells -->
       <div id="calGrid" style="display:grid; grid-template-columns:repeat(7,1fr); gap:2px;"></div>
-      <!-- Event detail popover -->
-      <div id="dayPopover" style="display:none; margin-top:12px; background:white; border:1.5px solid var(--ink); padding:14px;">
-        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
-          <div id="popoverDate" style="font-family:Fraunces,serif; font-size:0.85rem; font-style:italic;"></div>
-          <button onclick="document.getElementById('dayPopover').style.display='none'" style="background:none;border:none;cursor:pointer;color:var(--muted);display:flex;align-items:center;"><i data-lucide="x" style="width:14px;height:14px;"></i></button>
-        </div>
-        <ul id="popoverEvents" style="list-style:none; padding:0; margin:0;"></ul>
-        <button class="config-save" style="margin-top:10px; font-size:0.65rem; display:flex;align-items:center;gap:4px;" onclick="prefillNewEvent()"><i data-lucide="plus" style="width:11px;height:11px;"></i> Add event on this day</button>
-      </div>
-    </div>
-
-    <!-- Day Timeline -->
-    <div id="dayTimeline" style="margin-top:32px; display:none;">
-      <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px; border-top:1.5px solid var(--ink); padding-top:14px;">
-        <div id="timelineLabel" style="font-family:Fraunces,serif; font-weight:300; font-size:1rem; font-style:italic; color:var(--ink);"></div>
-        <button class="gcal-btn" style="font-size:0.6rem; padding:4px 10px; display:flex;align-items:center;gap:4px;" onclick="prefillNewEvent()"><i data-lucide="plus" style="width:11px;height:11px;"></i> Add event</button>
-      </div>
-      <div id="timelineGrid" style="position:relative; font-family:'DM Mono',monospace;">
-        <!-- hour rows injected by JS -->
-      </div>
     </div>
 
   </section>
 
   </div><!-- /col-calendar -->
 
-  <!-- RIGHT COLUMN: empty for now -->
-  <div class="col-right"></div>
+  <!-- RIGHT COLUMN: Day view -->
+  <div class="col-right">
+
+    <!-- No-day placeholder -->
+    <div id="dayViewEmpty" style="height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--muted); gap:8px; padding-top:80px;">
+      <i data-lucide="calendar-days" style="width:32px;height:32px; opacity:0.3;"></i>
+      <div style="font-family:Fraunces,serif; font-style:italic; font-size:0.9rem; font-weight:300;">Select a day</div>
+    </div>
+
+    <!-- Day detail view -->
+    <div id="dayDetailView" style="display:none;">
+
+      <!-- Header -->
+      <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:20px; border-bottom:1.5px solid var(--ink); padding-bottom:14px;">
+        <div id="dayViewLabel" style="font-family:Fraunces,serif; font-weight:300; font-size:1.2rem;"></div>
+        <button class="gcal-btn" style="font-size:0.6rem; padding:4px 10px; display:flex;align-items:center;gap:4px;" onclick="prefillNewEvent()">
+          <i data-lucide="plus" style="width:11px;height:11px;"></i> Add event
+        </button>
+      </div>
+
+      <!-- Event list -->
+      <div id="dayViewEventList" style="margin-bottom:24px;"></div>
+
+      <!-- Timeline -->
+      <div id="dayTimeline">
+        <div id="timelineLabel" style="display:none;"></div>
+        <div id="timelineGrid" style="position:relative; font-family:'DM Mono',monospace;"></div>
+      </div>
+
+    </div>
+
+  </div><!-- /col-right -->
 
 </div><!-- /app-layout -->
 
@@ -951,24 +961,26 @@ function selectDay(dateKey) {
   selectedDay = dateKey;
   renderCalendarGrid();
 
-  // Show popover
-  const popover = document.getElementById('dayPopover');
-  const label = document.getElementById('popoverDate');
-  const list = document.getElementById('popoverEvents');
-
   const d = new Date(dateKey + 'T00:00:00');
-  label.textContent = d.toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
-
-  // Events for this day
   const dayEvs = calEvents.filter(ev => {
     const raw = ev.start?.dateTime || ev.start?.date || '';
     return raw.slice(0, 10) === dateKey;
   });
 
+  // Show right-column day view
+  document.getElementById('dayViewEmpty').style.display = 'none';
+  document.getElementById('dayDetailView').style.display = 'block';
+
+  // Header label
+  document.getElementById('dayViewLabel').textContent =
+    d.toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long' });
+
+  // Event list
+  const listEl = document.getElementById('dayViewEventList');
   if (!dayEvs.length) {
-    list.innerHTML = `<li style="color:var(--muted);font-size:0.75rem;padding:6px 0;">No events</li>`;
+    listEl.innerHTML = `<div style="color:var(--muted);font-size:0.75rem;font-style:italic;font-family:Fraunces,serif;">No events</div>`;
   } else {
-    list.innerHTML = dayEvs.map(ev => {
+    listEl.innerHTML = `<ul style="list-style:none;padding:0;margin:0;">` + dayEvs.map(ev => {
       const start = ev.start?.dateTime || ev.start?.date || '';
       const timeStr = ev.start?.dateTime
         ? new Date(start).toLocaleTimeString('en-AU', { hour:'2-digit', minute:'2-digit' })
@@ -977,19 +989,20 @@ function selectDay(dateKey) {
       const endStr = ev.end?.dateTime
         ? ' – ' + new Date(endRaw).toLocaleTimeString('en-AU', { hour:'2-digit', minute:'2-digit' })
         : '';
+      const color = CAL_COLORS[(ev._calIdx||0) % CAL_COLORS.length];
       return `<li style="padding:7px 0; border-bottom:1px solid var(--line); display:flex; gap:10px; align-items:flex-start;">
-        <div style="width:6px;height:6px;border-radius:50%;background:${CAL_COLORS[(ev._calIdx||0) % CAL_COLORS.length]};flex-shrink:0;margin-top:5px;"></div>
+        <div style="width:6px;height:6px;border-radius:50%;background:${color};flex-shrink:0;margin-top:5px;"></div>
         <div>
           <div style="font-size:0.8rem; font-family:'Fraunces',serif; font-weight:300;">${escapeHtml(ev.summary || '(No title)')}</div>
           <div style="font-size:0.65rem; color:var(--muted);">${timeStr}${endStr}</div>
           ${ev.description ? `<div style="font-size:0.65rem;color:var(--muted);margin-top:2px;">${escapeHtml(ev.description)}</div>` : ''}
         </div>
       </li>`;
-    }).join('');
+    }).join('') + `</ul>`;
   }
 
-  popover.style.display = 'block';
   renderDayTimeline(dateKey, dayEvs);
+  if (window.lucide) lucide.createIcons();
 }
 
 function renderDayTimeline(dateKey, dayEvs) {
@@ -1107,8 +1120,6 @@ function renderDayTimeline(dateKey, dayEvs) {
   html += `</div>`; // close relative container
 
   grid.innerHTML = html;
-  timeline.style.display = 'block';
-
   // Scroll to first event or current time
   const scrollTarget = isToday ? Math.max(0, nowMins - 60) : Math.max(0, (minHour - 1) * 60);
   // no-op since we already restrict visible hours; container scrolls naturally
@@ -1117,7 +1128,7 @@ function renderDayTimeline(dateKey, dayEvs) {
 function shiftMonth(delta) {
   calViewDate.setMonth(calViewDate.getMonth() + delta);
   calEvents = [];
-  document.getElementById('dayPopover').style.display = 'none';
+  // day popover removed
   selectedDay = null;
   renderCalendarGrid();
   fetchCalendarEvents();
@@ -1131,7 +1142,7 @@ function prefillNewEvent() {
   document.getElementById('evStart').value = selectedDay + 'T09:00';
   document.getElementById('evEnd').value = selectedDay + 'T10:00';
   document.getElementById('evTitle').focus();
-  document.getElementById('dayPopover').style.display = 'none';
+  // day popover removed
 }
 
 function toggleCreateEvent() {
