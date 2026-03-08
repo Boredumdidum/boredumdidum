@@ -45,12 +45,32 @@
     z-index: 0;
   }
 
-  .container {
+  .container { display: none; } /* replaced by app-layout */
+
+  .app-layout {
     position: relative;
     z-index: 1;
-    max-width: 720px;
-    margin: 0 auto;
-    padding: 48px 24px 80px;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    min-height: 100vh;
+    align-items: start;
+  }
+
+  .col-tasks {
+    border-right: 1.5px solid var(--line);
+    padding: 48px 28px 80px;
+    min-height: 100vh;
+  }
+
+  .col-calendar {
+    border-right: 1.5px solid var(--line);
+    padding: 48px 28px 80px;
+    min-height: 100vh;
+  }
+
+  .col-right {
+    padding: 48px 28px 80px;
+    min-height: 100vh;
   }
 
   /* Header */
@@ -171,9 +191,15 @@
   /* Input area */
   .add-task {
     display: flex;
+    flex-wrap: wrap;
     gap: 0;
     margin-bottom: 40px;
     position: relative;
+  }
+
+  .add-task input[type="text"] {
+    flex: 1;
+    min-width: 0;
   }
 
   .add-task input {
@@ -423,7 +449,10 @@
 </style>
 </head>
 <body>
-<div class="container">
+<div class="app-layout">
+
+  <!-- LEFT COLUMN: Tasks -->
+  <div class="col-tasks">
 
   <header>
     <div class="logo">Task<span>Flow</span></div>
@@ -473,8 +502,13 @@
   <ul class="task-list" id="taskList"></ul>
   <div class="empty" id="emptyState" style="display:none">No tasks here yet.</div>
 
+  </div><!-- /col-tasks -->
+
+  <!-- MIDDLE COLUMN: Calendar -->
+  <div class="col-calendar">
+
   <!-- Google Calendar Section -->
-  <section class="gcal-section" id="gcalSection" style="margin-top:40px;">
+  <section class="gcal-section" id="gcalSection">
     <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px;">
       <h3 style="font-family:Fraunces, serif; font-weight:300; font-size:1.3rem; margin:0;">Google Calendar</h3>
       <div style="display:flex; gap:6px;">
@@ -520,9 +554,26 @@
         <button class="config-save" style="margin-top:10px; font-size:0.65rem;" onclick="prefillNewEvent()">+ Add event on this day</button>
       </div>
     </div>
+
+    <!-- Day Timeline -->
+    <div id="dayTimeline" style="margin-top:32px; display:none;">
+      <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px; border-top:1.5px solid var(--ink); padding-top:14px;">
+        <div id="timelineLabel" style="font-family:Fraunces,serif; font-weight:300; font-size:1rem; font-style:italic; color:var(--ink);"></div>
+        <button class="gcal-btn" style="font-size:0.6rem; padding:4px 10px;" onclick="prefillNewEvent()">+ Add event</button>
+      </div>
+      <div id="timelineGrid" style="position:relative; font-family:'DM Mono',monospace;">
+        <!-- hour rows injected by JS -->
+      </div>
+    </div>
+
   </section>
 
-</div>
+  </div><!-- /col-calendar -->
+
+  <!-- RIGHT COLUMN: empty for now -->
+  <div class="col-right"></div>
+
+</div><!-- /app-layout -->
 
 <div class="toast" id="toast"></div>
 
@@ -842,6 +893,126 @@ function selectDay(dateKey) {
   }
 
   popover.style.display = 'block';
+  renderDayTimeline(dateKey, dayEvs);
+}
+
+function renderDayTimeline(dateKey, dayEvs) {
+  const timeline = document.getElementById('dayTimeline');
+  const grid = document.getElementById('timelineGrid');
+  const label = document.getElementById('timelineLabel');
+
+  const d = new Date(dateKey + 'T00:00:00');
+  label.textContent = d.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
+
+  const HOUR_H = 48; // px per hour
+  const START_H = 0, END_H = 24;
+  const totalHours = END_H - START_H;
+
+  // Determine which hours have events so we can collapse empty stretches
+  const timedEvs = dayEvs.filter(ev => ev.start?.dateTime);
+  const allDayEvs = dayEvs.filter(ev => ev.start?.date && !ev.start?.dateTime);
+
+  // Find earliest and latest event, default to 8–18 if none
+  let minHour = 8, maxHour = 18;
+  if (timedEvs.length) {
+    timedEvs.forEach(ev => {
+      const sh = new Date(ev.start.dateTime).getHours();
+      const eh = Math.ceil((new Date(ev.end?.dateTime || ev.start.dateTime).getHours()) + (new Date(ev.end?.dateTime || ev.start.dateTime).getMinutes() / 60));
+      if (sh < minHour) minHour = sh;
+      if (eh > maxHour) maxHour = eh;
+    });
+    minHour = Math.max(0, minHour - 1);
+    maxHour = Math.min(24, maxHour + 1);
+  }
+
+  // Current time marker
+  const now = new Date();
+  const isToday = dateKey === now.toISOString().slice(0, 10);
+  const nowMins = now.getHours() * 60 + now.getMinutes();
+
+  let html = '';
+
+  // All-day events banner
+  if (allDayEvs.length) {
+    html += `<div style="margin-bottom:8px; display:flex; flex-wrap:wrap; gap:4px;">`;
+    allDayEvs.forEach(ev => {
+      html += `<div style="font-size:0.65rem; padding:3px 8px; background:var(--gcal); color:white; border-radius:2px; font-family:'DM Mono',monospace;">${escapeHtml(ev.summary || '(No title)')}</div>`;
+    });
+    html += `</div>`;
+  }
+
+  // Hour rows container
+  html += `<div style="position:relative; border-left:1.5px solid var(--line);">`;
+
+  for (let h = minHour; h < maxHour; h++) {
+    const label12 = h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h - 12} PM`;
+    html += `
+      <div style="display:flex; align-items:flex-start; position:relative; height:${HOUR_H}px; border-bottom:1px solid var(--line);">
+        <div style="width:44px; flex-shrink:0; font-size:0.58rem; color:var(--muted); padding:3px 8px 0 0; text-align:right; margin-left:-1px; letter-spacing:0.04em;">${label12}</div>
+        <div style="flex:1; position:relative; height:100%;">
+          <!-- half-hour tick -->
+          <div style="position:absolute; top:50%; left:0; right:0; border-top:1px dashed var(--line);"></div>
+        </div>
+      </div>`;
+  }
+
+  // Now-marker
+  if (isToday) {
+    const nowH = now.getHours() + now.getMinutes() / 60;
+    if (nowH >= minHour && nowH < maxHour) {
+      const topPct = ((nowH - minHour) / (maxHour - minHour)) * 100;
+      html += `<div style="position:absolute; left:44px; right:0; top:${topPct}%; z-index:4; pointer-events:none;">
+        <div style="position:relative; display:flex; align-items:center;">
+          <div style="width:8px; height:8px; border-radius:50%; background:var(--accent); margin-left:-4px; flex-shrink:0;"></div>
+          <div style="flex:1; height:1.5px; background:var(--accent);"></div>
+        </div>
+      </div>`;
+    }
+  }
+
+  // Event blocks
+  timedEvs.forEach(ev => {
+    const startDt = new Date(ev.start.dateTime);
+    const endDt = new Date(ev.end?.dateTime || ev.start.dateTime);
+    const startH = startDt.getHours() + startDt.getMinutes() / 60;
+    const endH = endDt.getHours() + endDt.getMinutes() / 60;
+
+    if (endH < minHour || startH >= maxHour) return;
+
+    const clampedStart = Math.max(startH, minHour);
+    const clampedEnd = Math.min(endH, maxHour);
+
+    const topPct = ((clampedStart - minHour) / (maxHour - minHour)) * 100;
+    const heightPct = ((clampedEnd - clampedStart) / (maxHour - minHour)) * 100;
+
+    const timeStr = startDt.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' })
+      + ' – ' + endDt.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+
+    html += `<div style="
+      position:absolute;
+      left:44px; right:4px;
+      top:${topPct}%; height:${heightPct}%;
+      min-height:20px;
+      background:rgba(26,115,232,0.12);
+      border-left:3px solid var(--gcal);
+      padding:3px 6px;
+      z-index:3;
+      overflow:hidden;
+      box-sizing:border-box;
+    ">
+      <div style="font-size:0.65rem; font-weight:500; color:var(--gcal); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(ev.summary || '(No title)')}</div>
+      <div style="font-size:0.58rem; color:var(--muted);">${timeStr}</div>
+    </div>`;
+  });
+
+  html += `</div>`; // close relative container
+
+  grid.innerHTML = html;
+  timeline.style.display = 'block';
+
+  // Scroll to first event or current time
+  const scrollTarget = isToday ? Math.max(0, nowMins - 60) : Math.max(0, (minHour - 1) * 60);
+  // no-op since we already restrict visible hours; container scrolls naturally
 }
 
 function shiftMonth(delta) {
