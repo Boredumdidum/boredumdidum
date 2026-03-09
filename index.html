@@ -6,6 +6,7 @@
 <title>TaskFlow</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,700;1,9..144,300&display=swap" rel="stylesheet">
+  <link rel="icon" href="icons/tf-favicon.svg" type="image/svg+xml">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -463,7 +464,15 @@
   <div class="col-tasks">
 
   <header>
-    <div class="logo">Task<span>Flow</span></div>
+    <div class="logo">
+      <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" role="img" style="height:2.4rem; width:auto; display:block; fill:currentColor;">
+        <title>TaskFlow</title>
+        <!-- Simple TF monogram: top bar, T stem, and F arms -->
+        <rect x="6" y="6" width="36" height="6" rx="1" />
+        <rect x="18" y="12" width="6" height="30" rx="1" />
+        <rect x="18" y="24" width="14" height="6" rx="1" />
+      </svg>
+    </div>
     <div style="display:flex;gap:0;">
       <button class="gcal-btn" id="gcalBtn" onclick="toggleAuth()" style="border-right:none;">
         <span id="gcalStatus" style="display:flex;align-items:center;gap:6px;"></span>
