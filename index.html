@@ -917,8 +917,45 @@ let calEvents = [];
 let calViewDate = new Date();
 let selectedDay = null;
 
+// Convert a GCal event start/end raw string to a local YYYY-MM-DD key.
+// For dateTime strings (which may be UTC like "...Z" or offset-aware like "+11:00"),
+// parse into a Date and use local calendar date. For date-only strings, use as-is.
+function localDateKey(raw) {
+  if (!raw) return '';
+  if (raw.length === 10) return raw; // already a date-only string, e.g. "2026-03-10"
+  const d = new Date(raw); // correctly parses both Z and offset formats
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+// Today's date key in local time
+function todayLocalKey() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 const CAL_COLORS = ['#1a73e8','#c84b2f','#4a7c5e','#8a44a0','#e67e22','#2980b9'];
 let pendingCalendars = [];
+
+// Helper: get the local YYYY-MM-DD date key for a calendar event.
+// For dateTime events, we must use the local date (not UTC slice) because
+// e.g. an 11pm AEST event has a next-day UTC date, placing it on the wrong day.
+function eventLocalDateKey(ev) {
+  if (ev.start?.dateTime) {
+    const d = new Date(ev.start.dateTime);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  // All-day events have a date string already in local time — use as-is
+  return (ev.start?.date || '').slice(0, 10);
+}
 
 // Helper: get normalized calendars array from config
 function getCalendars() {
@@ -938,8 +975,21 @@ async function fetchCalendarEvents() {
 
   const cals = getCalendars();
   const y = calViewDate.getFullYear(), m = calViewDate.getMonth();
-  const tMin = new Date(y, m, 1).toISOString();
-  const tMax = new Date(y, m + 1, 1).toISOString();
+  // Build RFC3339 strings anchored to local midnight so the window is correct
+  // regardless of the browser's UTC offset (avoids cutting off events near
+  // month boundaries for UTC+10/11 users).
+  function localMidnightISO(year, month, day) {
+    const pad = n => String(n).padStart(2, '0');
+    const d = new Date(year, month, day);
+    const off = -d.getTimezoneOffset(); // minutes ahead of UTC
+    const sign = off >= 0 ? '+' : '-';
+    const absOff = Math.abs(off);
+    const hh = pad(Math.floor(absOff / 60));
+    const mm = pad(absOff % 60);
+    return `${year}-${pad(month + 1)}-${pad(day)}T00:00:00${sign}${hh}:${mm}`;
+  }
+  const tMin = localMidnightISO(y, m, 1);
+  const tMax = localMidnightISO(y, m + 1, 1);
 
   try {
     const results = await Promise.all(cals.map((cal, idx) =>
@@ -967,7 +1017,7 @@ async function fetchCalendarEvents() {
     if (selectedDay) {
       const dayEvs = calEvents.filter(ev => {
         const raw = ev.start?.dateTime || ev.start?.date || '';
-        return raw.slice(0, 10) === selectedDay;
+        return localDateKey(raw) === selectedDay;
       });
       selectDay(selectedDay);
     }
@@ -1005,14 +1055,14 @@ function renderCalendarGrid() {
   calEvents.forEach(ev => {
     const raw = ev.start?.dateTime || ev.start?.date || '';
     if (!raw) return;
-    const key = raw.slice(0, 10);
+    const key = localDateKey(raw);
     if (!eventMap[key]) eventMap[key] = [];
     eventMap[key].push(ev);
   });
 
   const firstDay = new Date(y, m, 1).getDay();
   const daysInMonth = new Date(y, m + 1, 0).getDate();
-  const todayKey = new Date().toISOString().slice(0, 10);
+  const todayKey = todayLocalKey();
 
   const grid = document.getElementById('calGrid');
   let html = '';
@@ -1055,7 +1105,7 @@ function selectDay(dateKey) {
   const d = new Date(dateKey + 'T00:00:00');
   const dayEvs = calEvents.filter(ev => {
     const raw = ev.start?.dateTime || ev.start?.date || '';
-    return raw.slice(0, 10) === dateKey;
+    return localDateKey(raw) === dateKey;
   });
 
   document.getElementById('dayViewEmpty').style.display = 'none';
@@ -1108,17 +1158,19 @@ function renderDayTimeline(dateKey, dayEvs) {
   let minHour = 8, maxHour = 18;
   if (timedEvs.length) {
     timedEvs.forEach(ev => {
-      const sh = new Date(ev.start.dateTime).getHours();
-      const eh = Math.ceil((new Date(ev.end?.dateTime || ev.start.dateTime).getHours()) + (new Date(ev.end?.dateTime || ev.start.dateTime).getMinutes() / 60));
-      if (sh < minHour) minHour = sh;
-      if (eh > maxHour) maxHour = eh;
+      const startDt = new Date(ev.start.dateTime);
+      const endDt = new Date(ev.end?.dateTime || ev.start.dateTime);
+      const sh = startDt.getHours() + startDt.getMinutes() / 60;
+      const eh = endDt.getHours() + endDt.getMinutes() / 60;
+      if (sh < minHour) minHour = Math.floor(sh);
+      if (eh > maxHour) maxHour = Math.ceil(eh);
     });
     minHour = Math.max(0, minHour - 1);
     maxHour = Math.min(24, maxHour + 1);
   }
 
   const now = new Date();
-  const isToday = dateKey === now.toISOString().slice(0, 10);
+  const isToday = dateKey === todayLocalKey();
   const nowMins = now.getHours() * 60 + now.getMinutes();
 
   let html = '';
@@ -1132,12 +1184,12 @@ function renderDayTimeline(dateKey, dayEvs) {
     html += `</div>`;
   }
 
-  html += `<div style="position:relative; border-left:1.5px solid var(--line);">`;
+  html += `<div style="position:relative; border-left:1.5px solid var(--line); height:${(maxHour - minHour) * HOUR_H}px;">`;
 
   for (let h = minHour; h < maxHour; h++) {
     const label12 = h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h - 12} PM`;
     html += `
-      <div style="display:flex; align-items:flex-start; position:relative; height:${HOUR_H}px; border-bottom:1px solid var(--line);">
+      <div style="display:flex; align-items:flex-start; position:absolute; top:${(h - minHour) * HOUR_H}px; left:0; right:0; height:${HOUR_H}px; border-bottom:1px solid var(--line);">
         <div style="width:44px; flex-shrink:0; font-size:0.58rem; color:var(--muted); padding:3px 8px 0 0; text-align:right; margin-left:-1px; letter-spacing:0.04em;">${label12}</div>
         <div style="flex:1; position:relative; height:100%;">
           <div style="position:absolute; top:50%; left:0; right:0; border-top:1px dashed var(--line);"></div>
@@ -1148,8 +1200,8 @@ function renderDayTimeline(dateKey, dayEvs) {
   if (isToday) {
     const nowH = now.getHours() + now.getMinutes() / 60;
     if (nowH >= minHour && nowH < maxHour) {
-      const topPct = ((nowH - minHour) / (maxHour - minHour)) * 100;
-      html += `<div style="position:absolute; left:44px; right:0; top:${topPct}%; z-index:4; pointer-events:none;">
+      const topPx = (nowH - minHour) * HOUR_H;
+      html += `<div style="position:absolute; left:44px; right:0; top:${topPx}px; z-index:4; pointer-events:none;">
         <div style="position:relative; display:flex; align-items:center;">
           <div style="width:8px; height:8px; border-radius:50%; background:var(--accent); margin-left:-4px; flex-shrink:0;"></div>
           <div style="flex:1; height:1.5px; background:var(--accent);"></div>
@@ -1161,16 +1213,18 @@ function renderDayTimeline(dateKey, dayEvs) {
   timedEvs.forEach(ev => {
     const startDt = new Date(ev.start.dateTime);
     const endDt = new Date(ev.end?.dateTime || ev.start.dateTime);
+    // Use fractional hours in local time — getHours/getMinutes always return local values
     const startH = startDt.getHours() + startDt.getMinutes() / 60;
-    const endH = endDt.getHours() + endDt.getMinutes() / 60;
+    const endH   = endDt.getHours()   + endDt.getMinutes()   / 60;
 
-    if (endH < minHour || startH >= maxHour) return;
+    if (endH <= minHour || startH >= maxHour) return;
 
     const clampedStart = Math.max(startH, minHour);
-    const clampedEnd = Math.min(endH, maxHour);
+    const clampedEnd   = Math.min(endH, maxHour);
 
-    const topPct = ((clampedStart - minHour) / (maxHour - minHour)) * 100;
-    const heightPct = ((clampedEnd - clampedStart) / (maxHour - minHour)) * 100;
+    // Use absolute pixels so blocks sit precisely on the hour rows
+    const topPx    = (clampedStart - minHour) * HOUR_H;
+    const heightPx = Math.max((clampedEnd - clampedStart) * HOUR_H, 20);
 
     const timeStr = startDt.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' })
       + ' – ' + endDt.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
@@ -1181,8 +1235,7 @@ function renderDayTimeline(dateKey, dayEvs) {
     html += `<div style="
       position:absolute;
       left:44px; right:4px;
-      top:${topPct}%; height:${heightPct}%;
-      min-height:20px;
+      top:${topPx}px; height:${heightPx}px;
       background:rgba(${r},${g},${b},0.12);
       border-left:3px solid ${evColor};
       padding:3px 6px;
