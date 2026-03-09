@@ -46,7 +46,7 @@
     z-index: 0;
   }
 
-  .container { display: none; } /* replaced by app-layout */
+  .container { display: none; }
 
   .app-layout {
     position: relative;
@@ -168,13 +168,10 @@
 
   .config-input:focus { border-color: var(--ink); }
 
-  /* Cap credential/ID inputs so they don't overflow narrow columns */
-  #clientIdInput, #calendarIdInput {
+  #clientIdInput {
     font-size: 0.68rem;
     text-overflow: ellipsis;
   }
-
-  #taskDuration { width: 80px; }
 
   .config-save {
     font-family: 'DM Mono', monospace;
@@ -237,21 +234,42 @@
     border-right: none;
   }
 
-  .task-options input[type="datetime-local"],
-  .task-options input[type="number"] {
+  /* Time input takes the full height since minutes input is removed */
+  .task-options input[type="datetime-local"] {
     font-family: 'DM Mono', monospace;
     font-size: 0.7rem;
-    padding: 6px 8px;
+    padding: 8px 8px;
     border: none;
-    border-bottom: 1px solid var(--line);
     background: transparent;
     color: var(--ink);
     outline: none;
     width: 160px;
+    flex: 1;
   }
 
-  .task-options input[type="number"] {
-    border-bottom: none;
+  /* All-day checkbox row */
+  .task-allday-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 8px;
+    border-top: 1px solid var(--line);
+    font-size: 0.65rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+  }
+
+  .task-allday-row input[type="checkbox"] {
+    width: auto;
+    flex: none;
+    border: none;
+    padding: 0;
+    accent-color: var(--ink);
+    cursor: pointer;
   }
 
   .add-btn {
@@ -467,7 +485,6 @@
     <div class="logo">
       <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" role="img" style="height:2.4rem; width:auto; display:block; fill:currentColor;">
         <title>TaskFlow</title>
-        <!-- Simple TF monogram: top bar, T stem, and F arms -->
         <rect x="6" y="6" width="36" height="6" rx="1" />
         <rect x="18" y="12" width="6" height="30" rx="1" />
         <rect x="18" y="24" width="14" height="6" rx="1" />
@@ -491,8 +508,10 @@
     </div>
     <div style="margin-bottom:6px; font-size:0.65rem; color:var(--muted); letter-spacing:0.04em; text-transform:uppercase;">Calendars to sync</div>
     <div id="calendarIdList" style="display:flex; flex-direction:column; gap:5px; margin-bottom:8px;"></div>
-    <div class="config-row">
-      <input class="config-input" id="calendarIdInput" type="text" placeholder="Calendar ID (e.g. primary or abc@group.calendar.google.com)" maxlength="120" spellcheck="false" autocomplete="off" />
+    <!-- Add calendar row: ID + Name -->
+    <div class="config-row" style="gap:6px;">
+      <input class="config-input" id="calendarIdInput" type="text" placeholder="Calendar ID (e.g. primary)" maxlength="120" spellcheck="false" autocomplete="off" style="flex:2;" />
+      <input class="config-input" id="calendarNameInput" type="text" placeholder="Display name" maxlength="40" spellcheck="false" autocomplete="off" style="flex:1;" />
       <button class="config-save" onclick="addCalendarId()" style="display:flex;align-items:center;gap:4px;white-space:nowrap;"><i data-lucide="plus" style="width:12px;height:12px;"></i> Add</button>
     </div>
     <div class="config-row" style="margin-top:4px;">
@@ -508,10 +527,13 @@
 
   <!-- Add Task -->
   <div class="add-task">
-    <input type="text" id="taskInput" placeholder="What needs doing…" maxlength="200" onkeydown="if(event.key==='Enter') addTask()" />
+    <input type="text" id="taskInput" placeholder="Task…" maxlength="200" onkeydown="if(event.key==='Enter') addTask()" />
     <div class="task-options">
       <input type="datetime-local" id="taskDate" title="Due date/time" />
-      <input type="number" id="taskDuration" min="15" max="999" step="15" placeholder="mins (e.g. 30)" title="Duration in minutes" />
+      <label class="task-allday-row">
+        <input type="checkbox" id="taskAllDay" onchange="toggleAllDay()" />
+        All day
+      </label>
     </div>
     <button class="add-btn" onclick="addTask()" style="display:flex;align-items:center;justify-content:center;"><i data-lucide="plus" style="width:18px;height:18px;"></i></button>
   </div>
@@ -534,18 +556,16 @@
   <!-- MIDDLE COLUMN: Calendar -->
   <div class="col-calendar">
 
-  <!-- Google Calendar Section -->
   <section class="gcal-section" id="gcalSection">
     <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px;">
       <h3 style="font-family:Fraunces, serif; font-weight:300; font-size:1.3rem; margin:0;">Google Calendar</h3>
       <div style="display:flex; gap:6px;">
         <button class="gcal-btn" id="refreshGCalBtn" onclick="fetchCalendarEvents()" style="display:flex;align-items:center;gap:5px;"><i data-lucide="refresh-cw" style="width:12px;height:12px;"></i> Refresh</button>
-        <button class="gcal-btn" id="createEventToggle" onclick="toggleCreateEvent()" style="display:flex;align-items:center;gap:5px;"><i data-lucide="plus" style="width:12px;height:12px;"></i> Event</button>
       </div>
     </div>
     <div id="calLegend" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; font-size:0.62rem; font-family:'DM Mono',monospace; letter-spacing:0.04em;"></div>
 
-    <!-- Create Event Panel -->
+    <!-- Create Event Panel (accessible only from day view) -->
     <div id="createEventPanel" style="display:none; margin-bottom:16px; background:white; border:1.5px solid var(--ink); padding:16px;">
       <div style="font-family:Fraunces,serif; font-weight:300; font-style:italic; margin-bottom:10px; font-size:0.9rem;">New event</div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
@@ -598,14 +618,14 @@
         </button>
       </div>
 
-      <!-- Event list -->
-      <div id="dayViewEventList" style="margin-bottom:24px;"></div>
-
-      <!-- Timeline -->
-      <div id="dayTimeline">
+      <!-- Timeline FIRST -->
+      <div id="dayTimeline" style="margin-bottom:24px;">
         <div id="timelineLabel" style="display:none;"></div>
         <div id="timelineGrid" style="position:relative; font-family:'DM Mono',monospace;"></div>
       </div>
+
+      <!-- Event list SECOND -->
+      <div id="dayViewEventList"></div>
 
     </div>
 
@@ -627,47 +647,70 @@ let tokenClient = null;
 let accessToken = null;
 let currentFilter = 'all';
 
+// ── All-day toggle ─────────────────────────────────────────────────────
+function toggleAllDay() {
+  const allDay = document.getElementById('taskAllDay').checked;
+  const dateInput = document.getElementById('taskDate');
+  if (allDay) {
+    // Switch to date-only by converting input type
+    const currentVal = dateInput.value;
+    dateInput.type = 'date';
+    // Preserve the date part if there was a value
+    if (currentVal) dateInput.value = currentVal.slice(0, 10);
+  } else {
+    dateInput.type = 'datetime-local';
+  }
+}
+
 // ── Config ─────────────────────────────────────────────────────────────
 function addCalendarId() {
-  const input = document.getElementById('calendarIdInput');
-  const val = input.value.trim();
-  if (!val) return;
-  if (!pendingCalendarIds.includes(val)) {
-    pendingCalendarIds.push(val);
+  const idInput = document.getElementById('calendarIdInput');
+  const nameInput = document.getElementById('calendarNameInput');
+  const id = idInput.value.trim();
+  if (!id) return;
+  const name = nameInput.value.trim() || id;
+  if (!pendingCalendars.find(c => c.id === id)) {
+    pendingCalendars.push({ id, name });
     renderCalendarIdList();
   }
-  input.value = '';
+  idInput.value = '';
+  nameInput.value = '';
 }
 
 function removeCalendarId(id) {
-  pendingCalendarIds = pendingCalendarIds.filter(c => c !== id);
+  pendingCalendars = pendingCalendars.filter(c => c.id !== id);
   renderCalendarIdList();
 }
 
 function renderCalendarIdList() {
   const list = document.getElementById('calendarIdList');
   if (!list) return;
-  if (!pendingCalendarIds.length) {
+  if (!pendingCalendars.length) {
     list.innerHTML = '<div style="font-size:0.65rem;color:var(--muted);font-style:italic;">No calendars added yet</div>';
     return;
   }
-  list.innerHTML = pendingCalendarIds.map((id, i) =>
+  list.innerHTML = pendingCalendars.map((cal, i) =>
     `<div style="display:flex;align-items:center;gap:6px;font-size:0.7rem;padding:4px 8px;background:white;border:1px solid var(--line);">
       <span style="width:8px;height:8px;border-radius:50%;background:${CAL_COLORS[i % CAL_COLORS.length]};flex-shrink:0;"></span>
-      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(id)}</span>
-      <button onclick="removeCalendarId('${escapeHtml(id)}')" style="background:none;border:none;color:var(--muted);cursor:pointer;padding:0 2px;display:flex;align-items:center;"><i data-lucide="x" style="width:12px;height:12px;"></i></button>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;">${escapeHtml(cal.name)}</span>
+      <span style="color:var(--muted);font-size:0.6rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px;">${escapeHtml(cal.id)}</span>
+      <button onclick="removeCalendarId('${escapeHtml(cal.id)}')" style="background:none;border:none;color:var(--muted);cursor:pointer;padding:0 2px;display:flex;align-items:center;"><i data-lucide="x" style="width:12px;height:12px;"></i></button>
     </div>`
   ).join('');
+  if (window.lucide) lucide.createIcons();
 }
 
 function saveConfig() {
   const clientId = document.getElementById('clientIdInput').value.trim();
   if (!clientId) { showToast('Paste your Client ID first', true); return; }
-  // If they typed something in the add field but didn't click +, add it automatically
-  const extra = document.getElementById('calendarIdInput').value.trim();
-  if (extra && !pendingCalendarIds.includes(extra)) pendingCalendarIds.push(extra);
-  if (!pendingCalendarIds.length) pendingCalendarIds = ['primary'];
-  config = { clientId, calendarIds: [...pendingCalendarIds] };
+  // If they typed something in the add fields but didn't click +, add it automatically
+  const extraId = document.getElementById('calendarIdInput').value.trim();
+  const extraName = document.getElementById('calendarNameInput').value.trim();
+  if (extraId && !pendingCalendars.find(c => c.id === extraId)) {
+    pendingCalendars.push({ id: extraId, name: extraName || extraId });
+  }
+  if (!pendingCalendars.length) pendingCalendars = [{ id: 'primary', name: 'Primary' }];
+  config = { clientId, calendars: [...pendingCalendars] };
   localStorage.setItem('tf_config', JSON.stringify(config));
   initGoogleAuth();
   document.getElementById('configPanel').classList.remove('open');
@@ -691,8 +734,16 @@ function openConfig() {
   panel.classList.toggle('open');
   if (!isOpen) {
     if (config.clientId) document.getElementById('clientIdInput').value = config.clientId;
-    pendingCalendarIds = config.calendarIds ? [...config.calendarIds]
-      : config.calendarId ? [config.calendarId] : ['primary'];
+    // Support both old calendarId/calendarIds format and new calendars format
+    if (config.calendars) {
+      pendingCalendars = config.calendars.map(c => typeof c === 'string' ? { id: c, name: c } : c);
+    } else if (config.calendarIds) {
+      pendingCalendars = config.calendarIds.map(id => ({ id, name: id }));
+    } else if (config.calendarId) {
+      pendingCalendars = [{ id: config.calendarId, name: config.calendarId }];
+    } else {
+      pendingCalendars = [{ id: 'primary', name: 'Primary' }];
+    }
     renderCalendarIdList();
   }
 }
@@ -702,9 +753,15 @@ function initGoogleAuth() {
   if (!config.clientId) return;
 
   document.getElementById('clientIdInput').value = config.clientId;
-  // Populate pending list
-  pendingCalendarIds = config.calendarIds ? [...config.calendarIds]
-    : config.calendarId ? [config.calendarId] : ['primary'];
+  if (config.calendars) {
+    pendingCalendars = config.calendars.map(c => typeof c === 'string' ? { id: c, name: c } : c);
+  } else if (config.calendarIds) {
+    pendingCalendars = config.calendarIds.map(id => ({ id, name: id }));
+  } else if (config.calendarId) {
+    pendingCalendars = [{ id: config.calendarId, name: config.calendarId }];
+  } else {
+    pendingCalendars = [{ id: 'primary', name: 'Primary' }];
+  }
   renderCalendarIdList();
 
   tokenClient = google.accounts.oauth2.initTokenClient({
@@ -715,7 +772,6 @@ function initGoogleAuth() {
       accessToken = resp.access_token;
       updateGCalButton(true);
       showToast('Connected to Google Calendar ✓');
-      // After authenticating, fetch the user's upcoming events
       fetchCalendarEvents();
     },
   });
@@ -750,8 +806,8 @@ function addTask() {
   const text = input.value.trim();
   if (!text) return;
 
+  const allDay = document.getElementById('taskAllDay').checked;
   const dateVal = document.getElementById('taskDate').value;
-  const durVal = parseInt(document.getElementById('taskDuration').value) || 60;
 
   const task = {
     id: Date.now().toString(),
@@ -759,7 +815,8 @@ function addTask() {
     done: false,
     createdAt: new Date().toISOString(),
     dueDate: dateVal || null,
-    duration: durVal,
+    allDay: allDay,
+    duration: 60,
     gcalEventId: null,
   };
 
@@ -767,7 +824,9 @@ function addTask() {
   save();
   input.value = '';
   document.getElementById('taskDate').value = '';
-  document.getElementById('taskDuration').value = '';
+  document.getElementById('taskAllDay').checked = false;
+  // Reset date input to datetime-local
+  document.getElementById('taskDate').type = 'datetime-local';
   render();
   input.focus();
 }
@@ -791,20 +850,35 @@ async function pushToGCal(id) {
   const btn = document.querySelector(`[data-push="${id}"]`);
   if (btn) { btn.disabled = true; btn.textContent = '…'; }
 
-  // Build event times
-  const start = t.dueDate ? new Date(t.dueDate) : new Date();
-  const end = new Date(start.getTime() + (t.duration || 60) * 60000);
+  const calendars = getCalendars();
+  const calId = calendars[0]?.id || 'primary';
 
-  const event = {
-    summary: t.text,
-    description: `Created in TaskFlow`,
-    start: { dateTime: start.toISOString() },
-    end: { dateTime: end.toISOString() },
-  };
+  let event;
+  if (t.allDay && t.dueDate) {
+    const dateStr = t.dueDate.slice(0, 10);
+    const nextDay = new Date(dateStr);
+    nextDay.setDate(nextDay.getDate() + 1);
+    const nextDayStr = nextDay.toISOString().slice(0, 10);
+    event = {
+      summary: t.text,
+      description: 'Created in TaskFlow',
+      start: { date: dateStr },
+      end: { date: nextDayStr },
+    };
+  } else {
+    const start = t.dueDate ? new Date(t.dueDate) : new Date();
+    const end = new Date(start.getTime() + (t.duration || 60) * 60000);
+    event = {
+      summary: t.text,
+      description: 'Created in TaskFlow',
+      start: { dateTime: start.toISOString() },
+      end: { dateTime: end.toISOString() },
+    };
+  }
 
   try {
     const res = await fetch(
-      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent((config.calendarIds?.[0] || config.calendarId || 'primary'))}/events`,
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`,
       {
         method: 'POST',
         headers: {
@@ -840,40 +914,46 @@ async function pushToGCal(id) {
 
 // ── Calendar grid state ────────────────────────────────────────────────
 let calEvents = [];
-let calViewDate = new Date(); // month being shown
-let selectedDay = null;       // date string YYYY-MM-DD
+let calViewDate = new Date();
+let selectedDay = null;
 
-// Palette for multiple calendars (index → colour)
 const CAL_COLORS = ['#1a73e8','#c84b2f','#4a7c5e','#8a44a0','#e67e22','#2980b9'];
-// pendingCalendarIds used during config before save
-let pendingCalendarIds = [];
+let pendingCalendars = [];
+
+// Helper: get normalized calendars array from config
+function getCalendars() {
+  if (config.calendars && config.calendars.length) {
+    return config.calendars.map(c => typeof c === 'string' ? { id: c, name: c } : c);
+  }
+  if (config.calendarIds && config.calendarIds.length) {
+    return config.calendarIds.map(id => ({ id, name: id }));
+  }
+  if (config.calendarId) return [{ id: config.calendarId, name: config.calendarId }];
+  return [{ id: 'primary', name: 'Primary' }];
+}
 
 // ── Google Calendar: fetch & create events ─────────────────────────────
 async function fetchCalendarEvents() {
   if (!accessToken) { renderCalendarGrid(); return; }
 
-  const calIds = config.calendarIds && config.calendarIds.length
-    ? config.calendarIds
-    : [config.calendarId || 'primary'];
-
+  const cals = getCalendars();
   const y = calViewDate.getFullYear(), m = calViewDate.getMonth();
   const tMin = new Date(y, m, 1).toISOString();
   const tMax = new Date(y, m + 1, 1).toISOString();
 
   try {
-    const results = await Promise.all(calIds.map((calId, idx) =>
+    const results = await Promise.all(cals.map((cal, idx) =>
       fetch(
-        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events?orderBy=startTime&singleEvents=true&timeMin=${encodeURIComponent(tMin)}&timeMax=${encodeURIComponent(tMax)}&maxResults=250`,
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(cal.id)}/events?orderBy=startTime&singleEvents=true&timeMin=${encodeURIComponent(tMin)}&timeMax=${encodeURIComponent(tMax)}&maxResults=250`,
         { headers: { Authorization: `Bearer ${accessToken}` } }
       ).then(async res => {
         if (!res.ok) {
           const err = await res.json();
-          showToast(`GCal error (${calId}): ` + (err.error?.message || res.statusText), true);
+          showToast(`GCal error (${cal.name}): ` + (err.error?.message || res.statusText), true);
           return [];
         }
         const data = await res.json();
-        // Tag each event with its calendar index for colour-coding
-        return (data.items || []).map(ev => ({ ...ev, _calIdx: idx, _calId: calId }));
+        return (data.items || []).map(ev => ({ ...ev, _calIdx: idx, _calId: cal.id, _calName: cal.name }));
       }).catch(() => [])
     ));
 
@@ -883,6 +963,14 @@ async function fetchCalendarEvents() {
       return ta < tb ? -1 : ta > tb ? 1 : 0;
     });
     renderCalendarGrid();
+    // Re-render day view if one is selected
+    if (selectedDay) {
+      const dayEvs = calEvents.filter(ev => {
+        const raw = ev.start?.dateTime || ev.start?.date || '';
+        return raw.slice(0, 10) === selectedDay;
+      });
+      selectDay(selectedDay);
+    }
   } catch (e) {
     showToast('Network error fetching events', true);
   }
@@ -891,14 +979,12 @@ async function fetchCalendarEvents() {
 function renderCalLegend() {
   const legend = document.getElementById('calLegend');
   if (!legend) return;
-  const calIds = config.calendarIds && config.calendarIds.length
-    ? config.calendarIds : [config.calendarId || 'primary'];
-  if (calIds.length <= 1) { legend.innerHTML = ''; return; }
-  legend.innerHTML = calIds.map((id, i) => {
-    const label = id === 'primary' ? 'Primary' : id.split('@')[0];
+  const cals = getCalendars();
+  if (cals.length <= 1) { legend.innerHTML = ''; return; }
+  legend.innerHTML = cals.map((cal, i) => {
     return `<span style="display:flex;align-items:center;gap:4px;">
       <span style="width:8px;height:8px;border-radius:50%;background:${CAL_COLORS[i % CAL_COLORS.length]};flex-shrink:0;"></span>
-      <span style="color:var(--muted);text-transform:uppercase;">${escapeHtml(label)}</span>
+      <span style="color:var(--muted);text-transform:uppercase;">${escapeHtml(cal.name)}</span>
     </span>`;
   }).join('');
 }
@@ -909,14 +995,12 @@ function renderCalendarGrid() {
     new Date(y, m, 1).toLocaleString('en-AU', { month: 'long', year: 'numeric' });
   renderCalLegend();
 
-  // Day headers
   const dayHeaders = document.getElementById('calDayHeaders');
   const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   dayHeaders.innerHTML = dayNames.map(d =>
     `<div style="text-align:center;font-size:0.6rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);padding:4px 0;">${d}</div>`
   ).join('');
 
-  // Build event lookup by date key YYYY-MM-DD
   const eventMap = {};
   calEvents.forEach(ev => {
     const raw = ev.start?.dateTime || ev.start?.date || '';
@@ -926,15 +1010,13 @@ function renderCalendarGrid() {
     eventMap[key].push(ev);
   });
 
-  // Grid cells
-  const firstDay = new Date(y, m, 1).getDay(); // 0=Sun
+  const firstDay = new Date(y, m, 1).getDay();
   const daysInMonth = new Date(y, m + 1, 0).getDate();
   const todayKey = new Date().toISOString().slice(0, 10);
 
   const grid = document.getElementById('calGrid');
   let html = '';
 
-  // Leading empty cells
   for (let i = 0; i < firstDay; i++) {
     html += `<div style="min-height:60px;"></div>`;
   }
@@ -976,20 +1058,22 @@ function selectDay(dateKey) {
     return raw.slice(0, 10) === dateKey;
   });
 
-  // Show right-column day view
   document.getElementById('dayViewEmpty').style.display = 'none';
   document.getElementById('dayDetailView').style.display = 'block';
 
-  // Header label
   document.getElementById('dayViewLabel').textContent =
     d.toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long' });
 
-  // Event list
+  // ── Timeline FIRST ─────────────────────────────────────────────────
+  renderDayTimeline(dateKey, dayEvs);
+
+  // ── Event list SECOND ──────────────────────────────────────────────
   const listEl = document.getElementById('dayViewEventList');
   if (!dayEvs.length) {
     listEl.innerHTML = `<div style="color:var(--muted);font-size:0.75rem;font-style:italic;font-family:Fraunces,serif;">No events</div>`;
   } else {
-    listEl.innerHTML = `<ul style="list-style:none;padding:0;margin:0;">` + dayEvs.map(ev => {
+    listEl.innerHTML = `<div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.07em;color:var(--muted);margin-bottom:8px;margin-top:4px;">Events</div>
+    <ul style="list-style:none;padding:0;margin:0;">` + dayEvs.map(ev => {
       const start = ev.start?.dateTime || ev.start?.date || '';
       const timeStr = ev.start?.dateTime
         ? new Date(start).toLocaleTimeString('en-AU', { hour:'2-digit', minute:'2-digit' })
@@ -999,38 +1083,28 @@ function selectDay(dateKey) {
         ? ' – ' + new Date(endRaw).toLocaleTimeString('en-AU', { hour:'2-digit', minute:'2-digit' })
         : '';
       const color = CAL_COLORS[(ev._calIdx||0) % CAL_COLORS.length];
+      const calName = ev._calName || '';
       return `<li style="padding:7px 0; border-bottom:1px solid var(--line); display:flex; gap:10px; align-items:flex-start;">
         <div style="width:6px;height:6px;border-radius:50%;background:${color};flex-shrink:0;margin-top:5px;"></div>
         <div>
           <div style="font-size:0.8rem; font-family:'Fraunces',serif; font-weight:300;">${escapeHtml(ev.summary || '(No title)')}</div>
-          <div style="font-size:0.65rem; color:var(--muted);">${timeStr}${endStr}</div>
+          <div style="font-size:0.65rem; color:var(--muted);">${timeStr}${endStr}${calName ? ` · ${escapeHtml(calName)}` : ''}</div>
           ${ev.description ? `<div style="font-size:0.65rem;color:var(--muted);margin-top:2px;">${escapeHtml(ev.description)}</div>` : ''}
         </div>
       </li>`;
     }).join('') + `</ul>`;
   }
 
-  renderDayTimeline(dateKey, dayEvs);
   if (window.lucide) lucide.createIcons();
 }
 
 function renderDayTimeline(dateKey, dayEvs) {
-  const timeline = document.getElementById('dayTimeline');
   const grid = document.getElementById('timelineGrid');
-  const label = document.getElementById('timelineLabel');
 
-  const d = new Date(dateKey + 'T00:00:00');
-  label.textContent = d.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
-
-  const HOUR_H = 48; // px per hour
-  const START_H = 0, END_H = 24;
-  const totalHours = END_H - START_H;
-
-  // Determine which hours have events so we can collapse empty stretches
+  const HOUR_H = 48;
   const timedEvs = dayEvs.filter(ev => ev.start?.dateTime);
   const allDayEvs = dayEvs.filter(ev => ev.start?.date && !ev.start?.dateTime);
 
-  // Find earliest and latest event, default to 8–18 if none
   let minHour = 8, maxHour = 18;
   if (timedEvs.length) {
     timedEvs.forEach(ev => {
@@ -1043,23 +1117,21 @@ function renderDayTimeline(dateKey, dayEvs) {
     maxHour = Math.min(24, maxHour + 1);
   }
 
-  // Current time marker
   const now = new Date();
   const isToday = dateKey === now.toISOString().slice(0, 10);
   const nowMins = now.getHours() * 60 + now.getMinutes();
 
   let html = '';
 
-  // All-day events banner
   if (allDayEvs.length) {
     html += `<div style="margin-bottom:8px; display:flex; flex-wrap:wrap; gap:4px;">`;
     allDayEvs.forEach(ev => {
-      html += `<div style="font-size:0.65rem; padding:3px 8px; background:var(--gcal); color:white; border-radius:2px; font-family:'DM Mono',monospace;">${escapeHtml(ev.summary || '(No title)')}</div>`;
+      const color = CAL_COLORS[(ev._calIdx||0) % CAL_COLORS.length];
+      html += `<div style="font-size:0.65rem; padding:3px 8px; background:${color}; color:white; border-radius:2px; font-family:'DM Mono',monospace;">${escapeHtml(ev.summary || '(No title)')}</div>`;
     });
     html += `</div>`;
   }
 
-  // Hour rows container
   html += `<div style="position:relative; border-left:1.5px solid var(--line);">`;
 
   for (let h = minHour; h < maxHour; h++) {
@@ -1068,13 +1140,11 @@ function renderDayTimeline(dateKey, dayEvs) {
       <div style="display:flex; align-items:flex-start; position:relative; height:${HOUR_H}px; border-bottom:1px solid var(--line);">
         <div style="width:44px; flex-shrink:0; font-size:0.58rem; color:var(--muted); padding:3px 8px 0 0; text-align:right; margin-left:-1px; letter-spacing:0.04em;">${label12}</div>
         <div style="flex:1; position:relative; height:100%;">
-          <!-- half-hour tick -->
           <div style="position:absolute; top:50%; left:0; right:0; border-top:1px dashed var(--line);"></div>
         </div>
       </div>`;
   }
 
-  // Now-marker
   if (isToday) {
     const nowH = now.getHours() + now.getMinutes() / 60;
     if (nowH >= minHour && nowH < maxHour) {
@@ -1088,7 +1158,6 @@ function renderDayTimeline(dateKey, dayEvs) {
     }
   }
 
-  // Event blocks
   timedEvs.forEach(ev => {
     const startDt = new Date(ev.start.dateTime);
     const endDt = new Date(ev.end?.dateTime || ev.start.dateTime);
@@ -1126,18 +1195,13 @@ function renderDayTimeline(dateKey, dayEvs) {
     </div>`;
   });
 
-  html += `</div>`; // close relative container
-
+  html += `</div>`;
   grid.innerHTML = html;
-  // Scroll to first event or current time
-  const scrollTarget = isToday ? Math.max(0, nowMins - 60) : Math.max(0, (minHour - 1) * 60);
-  // no-op since we already restrict visible hours; container scrolls naturally
 }
 
 function shiftMonth(delta) {
   calViewDate.setMonth(calViewDate.getMonth() + delta);
   calEvents = [];
-  // day popover removed
   selectedDay = null;
   renderCalendarGrid();
   fetchCalendarEvents();
@@ -1147,11 +1211,9 @@ function prefillNewEvent() {
   if (!selectedDay) return;
   const panel = document.getElementById('createEventPanel');
   panel.style.display = 'block';
-  // Pre-fill start as 9am on selected day
   document.getElementById('evStart').value = selectedDay + 'T09:00';
   document.getElementById('evEnd').value = selectedDay + 'T10:00';
   document.getElementById('evTitle').focus();
-  // day popover removed
 }
 
 function toggleCreateEvent() {
@@ -1167,6 +1229,9 @@ async function createCalendarEvent() {
   const desc = document.getElementById('evDesc').value.trim();
   if (!title || !start || !end) { showToast('Please provide title, start and end', true); return; }
 
+  const cals = getCalendars();
+  const calId = cals[0]?.id || 'primary';
+
   const event = {
     summary: title,
     description: desc,
@@ -1176,7 +1241,7 @@ async function createCalendarEvent() {
 
   try {
     const res = await fetch(
-      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent((config.calendarIds?.[0] || config.calendarId || 'primary'))}/events`,
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`,
       {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
@@ -1232,9 +1297,14 @@ function render() {
   empty.style.display = 'none';
 
   list.innerHTML = filtered.map(t => {
-    const dateStr = t.dueDate
-      ? new Date(t.dueDate).toLocaleString('en-AU', { dateStyle: 'short', timeStyle: 'short' })
-      : '';
+    let dateStr = '';
+    if (t.dueDate) {
+      if (t.allDay) {
+        dateStr = new Date(t.dueDate + 'T00:00:00').toLocaleDateString('en-AU', { dateStyle: 'short' }) + ' · All day';
+      } else {
+        dateStr = new Date(t.dueDate).toLocaleString('en-AU', { dateStyle: 'short', timeStyle: 'short' });
+      }
+    }
 
     const gcalSection = t.gcalEventId
       ? `<span class="gcal-badge" style="display:inline-flex;align-items:center;gap:3px;"><i data-lucide="check" style="width:9px;height:9px;"></i> GCal</span>`
@@ -1248,7 +1318,7 @@ function render() {
         <div class="task-body">
           <div class="task-text">${escapeHtml(t.text)}</div>
           <div class="task-meta">
-            ${dateStr ? `<span class="task-date">${dateStr} · ${t.duration}min</span>` : ''}
+            ${dateStr ? `<span class="task-date">${dateStr}</span>` : ''}
             ${gcalSection}
           </div>
         </div>
@@ -1259,7 +1329,7 @@ function render() {
 }
 
 function escapeHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function save() {
@@ -1278,7 +1348,6 @@ function showToast(msg, isError = false) {
 
 // ── Init ───────────────────────────────────────────────────────────────
 window.addEventListener('load', () => {
-  // Wait for GSI to load
   const tryInit = setInterval(() => {
     if (window.google?.accounts?.oauth2 && config.clientId) {
       clearInterval(tryInit);
@@ -1288,7 +1357,7 @@ window.addEventListener('load', () => {
     }
   }, 200);
   render();
-  renderCalendarGrid(); // show empty calendar immediately
+  renderCalendarGrid();
   if (window.lucide) lucide.createIcons();
 });
 </script>
