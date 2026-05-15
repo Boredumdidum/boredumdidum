@@ -703,11 +703,12 @@ const STORAGE_KEYS = {
 };
 const SYNC_FILE_NAME = 'taskflow-sync';
 const KDF_ITERATIONS = 300000;
-const MAX_KDF_ITERATIONS = 10000000;
+const MAX_KDF_ITERATIONS = 1000000;
 const SYNC_DEBOUNCE_DELAY_MS = 1500;
 const MINUTES_TO_MS = 60 * 1000;
 const PASSPHRASE_TIMEOUT_MS = 10 * MINUTES_TO_MS;
 const BASE64_CHUNK_SIZE = 0x8000;
+const AUTH_ERROR_NAME = 'AuthError';
 
 function loadJson(key, fallback) {
   try {
@@ -730,6 +731,7 @@ let config = loadJson(STORAGE_KEYS.config, {});
 let syncState = loadJson(STORAGE_KEYS.sync, {});
 let datasetMeta = loadJson(STORAGE_KEYS.dataset, {});
 let deviceId = localStorage.getItem(STORAGE_KEYS.deviceId) || generateDeviceId();
+let metadataFromStorage = !!datasetMeta.updatedAt;
 
 if (!Array.isArray(tasks)) tasks = [];
 if (!localStorage.getItem(STORAGE_KEYS.deviceId)) {
@@ -934,6 +936,7 @@ function persistDatasetMeta() {
 function markLocalUpdate() {
   datasetMeta.updatedAt = new Date().toISOString();
   datasetMeta.deviceId = deviceId;
+  metadataFromStorage = true;
   persistDatasetMeta();
 }
 
@@ -960,6 +963,7 @@ function refreshPassphraseTimeout() {
   passphraseTimeoutId = setTimeout(() => {
     syncPassphrase = '';
     passphraseTimeoutId = null;
+    clearSyncDebounce();
     updateSyncUI();
     showToast('Sync locked — passphrase expired', true);
   }, PASSPHRASE_TIMEOUT_MS);
@@ -1017,6 +1021,8 @@ function toggleSyncEnabled() {
   if (enabled) {
     if (!syncPassphrase) showToast('Enter a passphrase to sync', true);
     if (accessToken && syncPassphrase) syncNow('enable');
+  } else {
+    clearSyncDebounce();
   }
 }
 
@@ -1031,6 +1037,13 @@ function syncNow(reason = 'manual') {
     return;
   }
   performSync(reason);
+}
+
+function clearSyncDebounce() {
+  if (syncDebounceTimer) {
+    clearTimeout(syncDebounceTimer);
+    syncDebounceTimer = null;
+  }
 }
 
 function scheduleSyncPush() {
@@ -1094,7 +1107,7 @@ async function decryptEnvelope(envelope, passphrase) {
   if (!saltRaw || !ivRaw || !envelope.data) throw new Error('Invalid payload');
   const hasIterations = envelope.kdf?.iterations !== undefined && envelope.kdf?.iterations !== null;
   const iterations = Number(envelope.kdf?.iterations);
-  if (hasIterations && (!Number.isFinite(iterations) || iterations <= 0)) {
+  if (hasIterations && (!Number.isFinite(iterations) || !Number.isInteger(iterations) || iterations <= 0)) {
     throw new Error('Invalid KDF iterations');
   }
   if (hasIterations && iterations > MAX_KDF_ITERATIONS) {
@@ -1122,9 +1135,16 @@ function applyRemoteDataset(remote) {
   tasks = Array.isArray(remote.tasks) ? remote.tasks : [];
   datasetMeta.updatedAt = remote.updatedAt || new Date().toISOString();
   datasetMeta.deviceId = remote.deviceId || datasetMeta.deviceId || deviceId;
+  metadataFromStorage = true;
   localStorage.setItem(STORAGE_KEYS.tasks, JSON.stringify(tasks));
   persistDatasetMeta();
   render();
+}
+
+function createAuthError() {
+  const err = new Error('Auth required');
+  err.name = AUTH_ERROR_NAME;
+  return err;
 }
 
 async function driveRequest(url, options = {}) {
@@ -1139,7 +1159,7 @@ async function driveRequest(url, options = {}) {
     accessToken = null;
     updateGCalButton(false);
     showToast('Session expired — reconnect', true);
-    throw new Error('unauth');
+    throw createAuthError();
   }
   return res;
 }
@@ -1229,6 +1249,7 @@ async function pushLocalDataset(dataset, fileId) {
     datasetMeta.updatedAt = dataset.updatedAt;
     persistDatasetMeta();
   }
+  metadataFromStorage = true;
   const payload = await encryptDataset(dataset, syncPassphrase);
   await uploadDrivePayload(payload, fileId);
 }
@@ -1258,8 +1279,8 @@ async function performSync(reason) {
     if (remote?.dataset) {
       const remoteUpdated = toValidDate(remote.dataset.updatedAt);
       if (!remoteUpdated) throw new Error('Remote data missing updatedAt');
-      const localUpdated = toValidDate(localDataset.updatedAt);
-      if (!syncState.lastSyncAt && !tasks.length) {
+      const localUpdated = metadataFromStorage ? toValidDate(localDataset.updatedAt) : null;
+      if (!syncState.lastSyncAt && !tasks.length && !metadataFromStorage) {
         applyRemoteDataset(remote.dataset);
         syncState.lastSyncAt = new Date().toISOString();
         persistSyncState();
@@ -1296,7 +1317,7 @@ async function performSync(reason) {
     syncState.lastError = msg;
     persistSyncState();
     updateSyncUI();
-    if (e.message !== 'unauth') showToast('Sync failed: ' + syncState.lastError, true);
+    if (e?.name !== AUTH_ERROR_NAME) showToast('Sync failed: ' + syncState.lastError, true);
   } finally {
     syncInProgress = false;
     updateSyncUI();
