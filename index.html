@@ -703,6 +703,7 @@ const STORAGE_KEYS = {
 };
 const SYNC_FILE_NAME = 'taskflow-sync';
 const KDF_ITERATIONS = 300000;
+const MAX_KDF_ITERATIONS = 10000000;
 const SYNC_DEBOUNCE_DELAY_MS = 1500;
 const MINUTES_TO_MS = 60 * 1000;
 const PASSPHRASE_TIMEOUT_MS = 10 * MINUTES_TO_MS;
@@ -719,7 +720,9 @@ function loadJson(key, fallback) {
 
 function generateDeviceId() {
   if (crypto.randomUUID) return crypto.randomUUID();
-  return `tf_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return `tf_${Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')}`;
 }
 
 let tasks = loadJson(STORAGE_KEYS.tasks, []);
@@ -1094,6 +1097,9 @@ async function decryptEnvelope(envelope, passphrase) {
   if (hasIterations && (!Number.isFinite(iterations) || iterations <= 0)) {
     throw new Error('Invalid KDF iterations');
   }
+  if (hasIterations && iterations > MAX_KDF_ITERATIONS) {
+    throw new Error('KDF iterations too high');
+  }
   const kdfIterations = hasIterations ? iterations : KDF_ITERATIONS;
   const salt = new Uint8Array(base64ToBuffer(saltRaw));
   const iv = new Uint8Array(base64ToBuffer(ivRaw));
@@ -1174,7 +1180,7 @@ async function fetchRemoteDataset() {
   try {
     envelope = JSON.parse(text);
   } catch (e) {
-    throw new Error('Invalid remote payload');
+    throw new Error('Invalid remote payload: ' + e.message);
   }
   const dataset = await decryptEnvelope(envelope, syncPassphrase);
   return { fileId: file.id, dataset };
