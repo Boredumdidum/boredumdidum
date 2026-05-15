@@ -702,6 +702,9 @@ const STORAGE_KEYS = {
   deviceId: 'tf_device_id',
 };
 const SYNC_FILE_NAME = 'taskflow-sync';
+const KDF_ITERATIONS = 600000;
+const SYNC_DEBOUNCE_DELAY_MS = 1500;
+const PASSPHRASE_TIMEOUT_MS = 10 * 60 * 1000;
 
 function loadJson(key, fallback) {
   try {
@@ -747,6 +750,7 @@ let syncPassphrase = '';
 let syncInProgress = false;
 let syncDebounceTimer = null;
 let pendingSyncAfterAuth = false;
+let passphraseTimeoutId = null;
 
 // ── All-day toggle ─────────────────────────────────────────────────────
 function toggleAllDay() {
@@ -935,6 +939,27 @@ function formatTimestamp(ts) {
   return d.toLocaleString('en-AU', { dateStyle: 'short', timeStyle: 'short' });
 }
 
+function refreshPassphraseTimeout() {
+  if (!syncPassphrase) return;
+  if (passphraseTimeoutId) clearTimeout(passphraseTimeoutId);
+  passphraseTimeoutId = setTimeout(() => {
+    syncPassphrase = '';
+    passphraseTimeoutId = null;
+    updateSyncUI();
+    showToast('Sync locked — passphrase expired', true);
+  }, PASSPHRASE_TIMEOUT_MS);
+}
+
+function clearSyncPassphrase(message) {
+  syncPassphrase = '';
+  if (passphraseTimeoutId) {
+    clearTimeout(passphraseTimeoutId);
+    passphraseTimeoutId = null;
+  }
+  updateSyncUI();
+  if (message) showToast(message, true);
+}
+
 function updateSyncUI() {
   const statusEl = document.getElementById('syncStatus');
   if (!statusEl) return;
@@ -972,6 +997,7 @@ function setSyncPassphrase() {
   input.value = '';
   syncState.lastError = null;
   persistSyncState();
+  refreshPassphraseTimeout();
   updateSyncUI();
   showToast('Sync unlocked ✓');
   if (syncState.enabled && accessToken) syncNow('unlock');
@@ -986,12 +1012,15 @@ function toggleSyncEnabled() {
   if (enabled) {
     if (!syncPassphrase) showToast('Enter a passphrase to sync', true);
     if (accessToken && syncPassphrase) syncNow('enable');
+  } else {
+    clearSyncPassphrase();
   }
 }
 
 function syncNow(reason = 'manual') {
   if (!syncState.enabled) { showToast('Enable sync first', true); return; }
   if (!syncPassphrase) { showToast('Enter a passphrase to sync', true); return; }
+  refreshPassphraseTimeout();
   if (!accessToken) {
     pendingSyncAfterAuth = true;
     authenticate();
@@ -1004,7 +1033,7 @@ function syncNow(reason = 'manual') {
 function scheduleSyncPush() {
   if (!syncState.enabled || !syncPassphrase) { updateSyncUI(); return; }
   clearTimeout(syncDebounceTimer);
-  syncDebounceTimer = setTimeout(() => syncNow('auto'), 1500);
+  syncDebounceTimer = setTimeout(() => syncNow('auto'), SYNC_DEBOUNCE_DELAY_MS);
 }
 
 function bufferToBase64(buffer) {
@@ -1024,7 +1053,7 @@ function base64ToBuffer(base64) {
   return bytes.buffer;
 }
 
-async function deriveKey(passphrase, salt) {
+async function deriveKey(passphrase, salt, iterations) {
   const baseKey = await crypto.subtle.importKey(
     'raw',
     textEncoder.encode(passphrase),
@@ -1033,7 +1062,7 @@ async function deriveKey(passphrase, salt) {
     ['deriveKey']
   );
   return crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt, iterations: 210000, hash: 'SHA-256' },
+    { name: 'PBKDF2', salt, iterations: iterations || KDF_ITERATIONS, hash: 'SHA-256' },
     baseKey,
     { name: 'AES-GCM', length: 256 },
     false,
@@ -1044,25 +1073,26 @@ async function deriveKey(passphrase, salt) {
 async function encryptDataset(dataset, passphrase) {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = await deriveKey(passphrase, salt);
+  const key = await deriveKey(passphrase, salt, KDF_ITERATIONS);
   const plaintext = textEncoder.encode(JSON.stringify(dataset));
   const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, plaintext);
   return {
     v: 1,
-    kdf: { name: 'PBKDF2', hash: 'SHA-256', iterations: 210000, salt: bufferToBase64(salt) },
+    kdf: { name: 'PBKDF2', hash: 'SHA-256', iterations: KDF_ITERATIONS, salt: bufferToBase64(salt) },
     cipher: { name: 'AES-GCM', iv: bufferToBase64(iv) },
     data: bufferToBase64(ciphertext),
   };
 }
 
 async function decryptEnvelope(envelope, passphrase) {
-  if (!envelope || envelope.v !== 1) throw new Error('Unsupported payload');
+  if (!envelope || envelope.v !== 1) throw new Error('Missing or unsupported payload version');
   const saltRaw = envelope.kdf?.salt;
   const ivRaw = envelope.cipher?.iv;
   if (!saltRaw || !ivRaw || !envelope.data) throw new Error('Invalid payload');
+  const iterations = Number(envelope.kdf?.iterations) || KDF_ITERATIONS;
   const salt = new Uint8Array(base64ToBuffer(saltRaw));
   const iv = new Uint8Array(base64ToBuffer(ivRaw));
-  const key = await deriveKey(passphrase, salt);
+  const key = await deriveKey(passphrase, salt, iterations);
   const ciphertext = base64ToBuffer(envelope.data);
   const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
   return JSON.parse(textDecoder.decode(plaintext));
@@ -1238,7 +1268,9 @@ async function performSync(reason) {
     updateSyncUI();
     if (reason === 'manual') showToast('Sync complete ✓');
   } catch (e) {
-    const msg = e?.name === 'OperationError' ? 'Passphrase incorrect' : (e.message || 'Sync failed');
+    const msg = e?.name === 'OperationError'
+      ? 'Passphrase incorrect or payload corrupted'
+      : (e.message || 'Sync failed');
     syncState.lastError = msg;
     persistSyncState();
     updateSyncUI();
