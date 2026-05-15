@@ -194,6 +194,39 @@
 
   .config-note a { color: var(--gcal); }
 
+  /* Sync panel */
+  .sync-panel {
+    background: white;
+    border: 1.5px solid var(--ink);
+    padding: 16px;
+    margin-bottom: 24px;
+  }
+
+  .sync-panel h3 {
+    font-family: 'Fraunces', serif;
+    font-size: 1rem;
+    margin-bottom: 12px;
+    font-weight: 300;
+    font-style: italic;
+  }
+
+  .sync-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.65rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .sync-status {
+    font-size: 0.65rem;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-top: 4px;
+  }
+
   /* Input area */
   .add-task {
     display: flex;
@@ -525,6 +558,26 @@
     </p>
   </div>
 
+  <!-- Sync Panel -->
+  <div class="sync-panel" id="syncPanel">
+    <h3>Drive Sync</h3>
+    <div class="config-row" style="align-items:center; justify-content:space-between; gap:12px;">
+      <label class="sync-toggle">
+        <input type="checkbox" id="syncEnabled" onchange="toggleSyncEnabled()" />
+        Enable sync
+      </label>
+      <button class="gcal-btn" id="syncNowBtn" onclick="syncNow()" style="font-size:0.6rem; padding:6px 10px; display:flex; align-items:center; gap:4px;">
+        <i data-lucide="refresh-cw" style="width:11px;height:11px;"></i> Sync now
+      </button>
+    </div>
+    <div class="config-row">
+      <input class="config-input" id="syncPassphrase" type="password" placeholder="Passphrase (not stored)" maxlength="128" autocomplete="new-password" onkeydown="if(event.key==='Enter') setSyncPassphrase()" />
+      <button class="config-save" onclick="setSyncPassphrase()" style="white-space:nowrap;">Unlock</button>
+    </div>
+    <div class="sync-status" id="syncStatus"></div>
+    <p class="config-note">Sync uses Google Drive appData and requires Google authorization (enable the Google Drive API).</p>
+  </div>
+
   <!-- Add Task -->
   <div class="add-task">
     <input type="text" id="taskInput" placeholder="Task…" maxlength="200" onkeydown="if(event.key==='Enter') addTask()" />
@@ -641,11 +694,59 @@
 
 <script>
 // ── State ──────────────────────────────────────────────────────────────
-let tasks = JSON.parse(localStorage.getItem('tf_tasks') || '[]');
-let config = JSON.parse(localStorage.getItem('tf_config') || '{}');
+const STORAGE_KEYS = {
+  tasks: 'tf_tasks',
+  config: 'tf_config',
+  sync: 'tf_sync',
+  dataset: 'tf_dataset_meta',
+  deviceId: 'tf_device_id',
+};
+const SYNC_FILE_NAME = 'taskflow-sync';
+
+function loadJson(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function generateDeviceId() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  return `tf_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+let tasks = loadJson(STORAGE_KEYS.tasks, []);
+let config = loadJson(STORAGE_KEYS.config, {});
+let syncState = loadJson(STORAGE_KEYS.sync, {});
+let datasetMeta = loadJson(STORAGE_KEYS.dataset, {});
+let deviceId = localStorage.getItem(STORAGE_KEYS.deviceId) || generateDeviceId();
+
+if (!Array.isArray(tasks)) tasks = [];
+if (!localStorage.getItem(STORAGE_KEYS.deviceId)) {
+  localStorage.setItem(STORAGE_KEYS.deviceId, deviceId);
+}
+
+if (!datasetMeta.updatedAt) datasetMeta.updatedAt = tasks.length ? new Date().toISOString() : null;
+datasetMeta.deviceId = datasetMeta.deviceId || deviceId;
+localStorage.setItem(STORAGE_KEYS.dataset, JSON.stringify(datasetMeta));
+
+syncState = {
+  enabled: false,
+  lastSyncAt: null,
+  fileId: null,
+  lastError: null,
+  ...syncState,
+};
+
 let tokenClient = null;
 let accessToken = null;
 let currentFilter = 'all';
+let syncPassphrase = '';
+let syncInProgress = false;
+let syncDebounceTimer = null;
+let pendingSyncAfterAuth = false;
 
 // ── All-day toggle ─────────────────────────────────────────────────────
 function toggleAllDay() {
@@ -711,7 +812,7 @@ function saveConfig() {
   }
   if (!pendingCalendars.length) pendingCalendars = [{ id: 'primary', name: 'Primary' }];
   config = { clientId, calendars: [...pendingCalendars] };
-  localStorage.setItem('tf_config', JSON.stringify(config));
+  localStorage.setItem(STORAGE_KEYS.config, JSON.stringify(config));
   initGoogleAuth();
   document.getElementById('configPanel').classList.remove('open');
   showToast('Config saved — click Connect to authenticate');
@@ -766,13 +867,21 @@ function initGoogleAuth() {
 
   tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: config.clientId,
-    scope: 'https://www.googleapis.com/auth/calendar.events',
+    scope: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.appdata',
     callback: (resp) => {
       if (resp.error) { showToast('Auth failed: ' + resp.error, true); return; }
       accessToken = resp.access_token;
       updateGCalButton(true);
       showToast('Connected to Google Calendar ✓');
       fetchCalendarEvents();
+      if (pendingSyncAfterAuth) {
+        pendingSyncAfterAuth = false;
+        if (syncState.enabled && syncPassphrase) syncNow('auth');
+      } else if (syncState.enabled && syncPassphrase) {
+        syncNow('auth');
+      } else {
+        updateSyncUI();
+      }
     },
   });
 
@@ -797,7 +906,347 @@ function updateGCalButton(connected) {
       : '<i data-lucide="calendar" style="width:13px;height:13px;"></i> Configure GCal';
   }
   if (window.lucide) lucide.createIcons();
+  updateSyncUI();
   render();
+}
+
+// ── Sync + Encryption ───────────────────────────────────────────────────
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+
+function persistSyncState() {
+  localStorage.setItem(STORAGE_KEYS.sync, JSON.stringify(syncState));
+}
+
+function persistDatasetMeta() {
+  localStorage.setItem(STORAGE_KEYS.dataset, JSON.stringify(datasetMeta));
+}
+
+function markLocalUpdate() {
+  datasetMeta.updatedAt = new Date().toISOString();
+  datasetMeta.deviceId = deviceId;
+  persistDatasetMeta();
+}
+
+function formatTimestamp(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return ts;
+  return d.toLocaleString('en-AU', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function updateSyncUI() {
+  const statusEl = document.getElementById('syncStatus');
+  if (!statusEl) return;
+  const enabledEl = document.getElementById('syncEnabled');
+  const nowBtn = document.getElementById('syncNowBtn');
+  const enabled = !!syncState.enabled;
+  if (enabledEl) enabledEl.checked = enabled;
+  if (nowBtn) nowBtn.disabled = !enabled || syncInProgress;
+
+  let status = 'Sync off';
+  if (!enabled) {
+    status = 'Sync off';
+  } else if (!syncPassphrase) {
+    status = 'Locked — enter passphrase';
+  } else if (!accessToken) {
+    status = 'Connect Google to sync';
+  } else if (syncInProgress) {
+    status = 'Syncing…';
+  } else if (syncState.lastError) {
+    status = syncState.lastError;
+  } else if (syncState.lastSyncAt) {
+    status = `Last sync ${formatTimestamp(syncState.lastSyncAt)}`;
+  } else {
+    status = 'Sync ready';
+  }
+  statusEl.textContent = status;
+}
+
+function setSyncPassphrase() {
+  const input = document.getElementById('syncPassphrase');
+  if (!input) return;
+  const pass = input.value.trim();
+  if (!pass) { showToast('Enter a passphrase first', true); return; }
+  syncPassphrase = pass;
+  input.value = '';
+  syncState.lastError = null;
+  persistSyncState();
+  updateSyncUI();
+  showToast('Sync unlocked ✓');
+  if (syncState.enabled && accessToken) syncNow('unlock');
+}
+
+function toggleSyncEnabled() {
+  const enabled = document.getElementById('syncEnabled').checked;
+  syncState.enabled = enabled;
+  syncState.lastError = null;
+  persistSyncState();
+  updateSyncUI();
+  if (enabled) {
+    if (!syncPassphrase) showToast('Enter a passphrase to sync', true);
+    if (accessToken && syncPassphrase) syncNow('enable');
+  }
+}
+
+function syncNow(reason = 'manual') {
+  if (!syncState.enabled) { showToast('Enable sync first', true); return; }
+  if (!syncPassphrase) { showToast('Enter a passphrase to sync', true); return; }
+  if (!accessToken) {
+    pendingSyncAfterAuth = true;
+    authenticate();
+    updateSyncUI();
+    return;
+  }
+  performSync(reason);
+}
+
+function scheduleSyncPush() {
+  if (!syncState.enabled || !syncPassphrase) { updateSyncUI(); return; }
+  clearTimeout(syncDebounceTimer);
+  syncDebounceTimer = setTimeout(() => syncNow('auto'), 1500);
+}
+
+function bufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+function base64ToBuffer(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
+async function deriveKey(passphrase, salt) {
+  const baseKey = await crypto.subtle.importKey(
+    'raw',
+    textEncoder.encode(passphrase),
+    'PBKDF2',
+    false,
+    ['deriveKey']
+  );
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations: 210000, hash: 'SHA-256' },
+    baseKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
+
+async function encryptDataset(dataset, passphrase) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await deriveKey(passphrase, salt);
+  const plaintext = textEncoder.encode(JSON.stringify(dataset));
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, plaintext);
+  return {
+    v: 1,
+    kdf: { name: 'PBKDF2', hash: 'SHA-256', iterations: 210000, salt: bufferToBase64(salt) },
+    cipher: { name: 'AES-GCM', iv: bufferToBase64(iv) },
+    data: bufferToBase64(ciphertext),
+  };
+}
+
+async function decryptEnvelope(envelope, passphrase) {
+  if (!envelope || envelope.v !== 1) throw new Error('Unsupported payload');
+  const saltRaw = envelope.kdf?.salt;
+  const ivRaw = envelope.cipher?.iv;
+  if (!saltRaw || !ivRaw || !envelope.data) throw new Error('Invalid payload');
+  const salt = new Uint8Array(base64ToBuffer(saltRaw));
+  const iv = new Uint8Array(base64ToBuffer(ivRaw));
+  const key = await deriveKey(passphrase, salt);
+  const ciphertext = base64ToBuffer(envelope.data);
+  const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
+  return JSON.parse(textDecoder.decode(plaintext));
+}
+
+function buildDataset() {
+  return {
+    version: 1,
+    updatedAt: datasetMeta.updatedAt,
+    deviceId,
+    tasks,
+  };
+}
+
+function applyRemoteDataset(remote) {
+  tasks = Array.isArray(remote.tasks) ? remote.tasks : [];
+  datasetMeta.updatedAt = remote.updatedAt || new Date().toISOString();
+  datasetMeta.deviceId = remote.deviceId || datasetMeta.deviceId || deviceId;
+  localStorage.setItem(STORAGE_KEYS.tasks, JSON.stringify(tasks));
+  persistDatasetMeta();
+  render();
+}
+
+async function driveRequest(url, options = {}) {
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      ...(options.headers || {}),
+    },
+  });
+  if (res.status === 401) {
+    accessToken = null;
+    updateGCalButton(false);
+    showToast('Session expired — reconnect', true);
+    throw new Error('unauth');
+  }
+  return res;
+}
+
+async function findDriveFile() {
+  if (syncState.fileId) {
+    const res = await driveRequest(
+      `https://www.googleapis.com/drive/v3/files/${syncState.fileId}?fields=id,name,modifiedTime`
+    );
+    if (res.ok) return res.json();
+    if (res.status !== 404) throw new Error('Drive lookup failed');
+    syncState.fileId = null;
+    persistSyncState();
+  }
+  const query = encodeURIComponent(`name='${SYNC_FILE_NAME}' and 'appDataFolder' in parents and trashed=false`);
+  const res = await driveRequest(
+    `https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${query}&fields=files(id,name,modifiedTime)`
+  );
+  if (!res.ok) throw new Error('Drive lookup failed');
+  const data = await res.json();
+  const file = data.files?.[0];
+  if (file) {
+    syncState.fileId = file.id;
+    persistSyncState();
+  }
+  return file || null;
+}
+
+async function fetchRemoteDataset() {
+  const file = await findDriveFile();
+  if (!file) return null;
+  const res = await driveRequest(`https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`);
+  if (!res.ok) throw new Error('Drive read failed');
+  const text = await res.text();
+  if (!text) return null;
+  let envelope;
+  try {
+    envelope = JSON.parse(text);
+  } catch (e) {
+    throw new Error('Invalid remote payload');
+  }
+  const dataset = await decryptEnvelope(envelope, syncPassphrase);
+  return { fileId: file.id, dataset };
+}
+
+async function uploadDrivePayload(payload, fileId) {
+  const body = JSON.stringify(payload);
+  if (fileId) {
+    const res = await driveRequest(
+      `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&fields=id,modifiedTime`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+        body,
+      }
+    );
+    if (!res.ok) throw new Error('Drive update failed');
+    return res.json();
+  }
+  const boundary = `taskflow-boundary-${Math.random().toString(36).slice(2)}`;
+  const metadata = { name: SYNC_FILE_NAME, parents: ['appDataFolder'], mimeType: 'application/json' };
+  const multipartBody =
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` +
+    `${JSON.stringify(metadata)}\r\n` +
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` +
+    `${body}\r\n` +
+    `--${boundary}--`;
+  const res = await driveRequest(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,modifiedTime',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+      body: multipartBody,
+    }
+  );
+  if (!res.ok) throw new Error('Drive create failed');
+  const data = await res.json();
+  syncState.fileId = data.id;
+  persistSyncState();
+  return data;
+}
+
+async function pushLocalDataset(dataset, fileId) {
+  if (!dataset.updatedAt) {
+    dataset.updatedAt = new Date().toISOString();
+    datasetMeta.updatedAt = dataset.updatedAt;
+    persistDatasetMeta();
+  }
+  const payload = await encryptDataset(dataset, syncPassphrase);
+  await uploadDrivePayload(payload, fileId);
+}
+
+async function performSync(reason) {
+  if (syncInProgress) return;
+  syncInProgress = true;
+  syncState.lastError = null;
+  persistSyncState();
+  updateSyncUI();
+  try {
+    const localDataset = buildDataset();
+    const remote = await fetchRemoteDataset();
+    const lastSync = syncState.lastSyncAt ? new Date(syncState.lastSyncAt) : null;
+    let conflict = false;
+
+    if (remote?.dataset) {
+      const remoteUpdated = remote.dataset.updatedAt ? new Date(remote.dataset.updatedAt) : null;
+      const localUpdated = localDataset.updatedAt ? new Date(localDataset.updatedAt) : null;
+      if (
+        lastSync &&
+        remoteUpdated &&
+        localUpdated &&
+        remoteUpdated > lastSync &&
+        localUpdated > lastSync &&
+        remoteUpdated.getTime() !== localUpdated.getTime()
+      ) {
+        conflict = true;
+      }
+      if (remoteUpdated && localUpdated) {
+        if (remoteUpdated > localUpdated) {
+          applyRemoteDataset(remote.dataset);
+          if (conflict) showToast('Conflict detected — remote won', true);
+        } else if (localUpdated > remoteUpdated) {
+          await pushLocalDataset(localDataset, remote.fileId);
+          if (conflict) showToast('Conflict detected — local won');
+        }
+      } else if (remoteUpdated && !localUpdated) {
+        applyRemoteDataset(remote.dataset);
+      } else if (!remoteUpdated && localUpdated) {
+        await pushLocalDataset(localDataset, remote.fileId);
+      }
+    } else {
+      await pushLocalDataset(localDataset, null);
+    }
+
+    syncState.lastSyncAt = new Date().toISOString();
+    persistSyncState();
+    updateSyncUI();
+    if (reason === 'manual') showToast('Sync complete ✓');
+  } catch (e) {
+    const msg = e?.name === 'OperationError' ? 'Passphrase incorrect' : (e.message || 'Sync failed');
+    syncState.lastError = msg;
+    persistSyncState();
+    updateSyncUI();
+    if (e.message !== 'unauth') showToast('Sync failed: ' + syncState.lastError, true);
+  } finally {
+    syncInProgress = false;
+    updateSyncUI();
+  }
 }
 
 // ── Tasks ──────────────────────────────────────────────────────────────
@@ -1385,8 +1834,15 @@ function escapeHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function save() {
-  localStorage.setItem('tf_tasks', JSON.stringify(tasks));
+function save(options = {}) {
+  const { skipSync = false } = options;
+  localStorage.setItem(STORAGE_KEYS.tasks, JSON.stringify(tasks));
+  if (skipSync) {
+    persistDatasetMeta();
+    return;
+  }
+  markLocalUpdate();
+  scheduleSyncPush();
 }
 
 // ── Toast ──────────────────────────────────────────────────────────────
@@ -1410,6 +1866,7 @@ window.addEventListener('load', () => {
     }
   }, 200);
   render();
+  updateSyncUI();
   renderCalendarGrid();
   if (window.lucide) lucide.createIcons();
 });
