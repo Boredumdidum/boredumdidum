@@ -571,7 +571,7 @@
       </button>
     </div>
     <div class="config-row">
-      <input class="config-input" id="syncPassphrase" type="password" placeholder="Passphrase (not stored)" maxlength="128" autocomplete="off" onkeydown="if(event.key==='Enter') setSyncPassphrase()" />
+      <input class="config-input" id="syncPassphrase" type="password" placeholder="Passphrase (not stored)" maxlength="512" autocomplete="off" onkeydown="if(event.key==='Enter') setSyncPassphrase()" />
       <button class="config-save" onclick="setSyncPassphrase()" style="white-space:nowrap;">Unlock</button>
     </div>
     <div class="sync-status" id="syncStatus"></div>
@@ -702,8 +702,8 @@ const STORAGE_KEYS = {
   deviceId: 'tf_device_id',
 };
 const SYNC_FILE_NAME = 'taskflow-sync';
-const KDF_ITERATIONS = 300000;
-const MAX_KDF_ITERATIONS = 1000000;
+const KDF_ITERATIONS = 600000;
+const MAX_KDF_ITERATIONS = 2000000;
 const SYNC_DEBOUNCE_DELAY_MS = 1500;
 const MINUTES_TO_MS = 60 * 1000;
 const PASSPHRASE_TIMEOUT_MS = 10 * MINUTES_TO_MS;
@@ -1105,15 +1105,15 @@ async function decryptEnvelope(envelope, passphrase) {
   const saltRaw = envelope.kdf?.salt;
   const ivRaw = envelope.cipher?.iv;
   if (!saltRaw || !ivRaw || !envelope.data) throw new Error('Invalid payload');
-  const hasIterations = envelope.kdf?.iterations !== undefined && envelope.kdf?.iterations !== null;
+  const iterationsProvided = envelope.kdf?.iterations !== undefined && envelope.kdf?.iterations !== null;
   const iterations = Number(envelope.kdf?.iterations);
-  if (hasIterations && (!Number.isFinite(iterations) || !Number.isInteger(iterations) || iterations <= 0)) {
+  if (iterationsProvided && (!Number.isFinite(iterations) || !Number.isInteger(iterations) || iterations <= 0)) {
     throw new Error('Invalid KDF iterations');
   }
-  if (hasIterations && iterations > MAX_KDF_ITERATIONS) {
+  if (iterationsProvided && iterations > MAX_KDF_ITERATIONS) {
     throw new Error('KDF iterations too high');
   }
-  const kdfIterations = hasIterations ? iterations : KDF_ITERATIONS;
+  const kdfIterations = iterationsProvided ? iterations : KDF_ITERATIONS;
   const salt = new Uint8Array(base64ToBuffer(saltRaw));
   const iv = new Uint8Array(base64ToBuffer(ivRaw));
   const key = await deriveKey(passphrase, salt, kdfIterations);
@@ -1158,7 +1158,7 @@ async function driveRequest(url, options = {}) {
   if (res.status === 401) {
     accessToken = null;
     updateGCalButton(false);
-    showToast('Session expired — reconnect', true);
+    showToast('Session expired. Click Connect to re-authenticate', true);
     throw createAuthError();
   }
   return res;
@@ -1276,11 +1276,12 @@ async function performSync(reason) {
     const remote = await fetchRemoteDataset();
     const lastSync = toValidDate(syncState.lastSyncAt);
 
+    const isFirstSyncNoLocalData = !syncState.lastSyncAt && !tasks.length && !metadataFromStorage;
     if (remote?.dataset) {
       const remoteUpdated = toValidDate(remote.dataset.updatedAt);
       if (!remoteUpdated) throw new Error('Remote data missing updatedAt');
       const localUpdated = metadataFromStorage ? toValidDate(localDataset.updatedAt) : null;
-      if (!syncState.lastSyncAt && !tasks.length && !metadataFromStorage) {
+      if (isFirstSyncNoLocalData) {
         applyRemoteDataset(remote.dataset);
         syncState.lastSyncAt = new Date().toISOString();
         persistSyncState();
@@ -1290,10 +1291,12 @@ async function performSync(reason) {
       }
       const conflict = isConflict(lastSync, remoteUpdated, localUpdated);
       if (remoteUpdated && localUpdated) {
-        if (remoteUpdated > localUpdated) {
+        const remoteTime = remoteUpdated.getTime();
+        const localTime = localUpdated.getTime();
+        if (remoteTime > localTime) {
           applyRemoteDataset(remote.dataset);
           if (conflict) showToast('Conflict detected — remote won', true);
-        } else if (localUpdated > remoteUpdated) {
+        } else if (localTime > remoteTime) {
           await pushLocalDataset(localDataset, remote.fileId);
           if (conflict) showToast('Conflict detected — local won');
         }
@@ -1312,7 +1315,7 @@ async function performSync(reason) {
     if (reason === 'manual') showToast('Sync complete ✓');
   } catch (e) {
     const msg = e?.name === 'OperationError'
-      ? 'Decryption failed: verify passphrase or check data integrity'
+      ? 'Decryption failed: incorrect passphrase or corrupted data'
       : (e.message || 'Unexpected sync error');
     syncState.lastError = msg;
     persistSyncState();
@@ -1417,7 +1420,7 @@ async function pushToGCal(id) {
       const err = await res.json();
       if (err.error?.status === 'UNAUTHENTICATED') {
         accessToken = null; updateGCalButton(false);
-        showToast('Session expired — reconnect', true);
+        showToast('Session expired. Click Connect to re-authenticate', true);
       } else {
         showToast('GCal error: ' + (err.error?.message || 'unknown'), true);
       }
