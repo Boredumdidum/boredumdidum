@@ -706,6 +706,7 @@ const KDF_ITERATIONS = 300000;
 const SYNC_DEBOUNCE_DELAY_MS = 1500;
 const MINUTES_TO_MS = 60 * 1000;
 const PASSPHRASE_TIMEOUT_MS = 10 * MINUTES_TO_MS;
+const BASE64_CHUNK_SIZE = 0x8000;
 
 function loadJson(key, fallback) {
   try {
@@ -732,7 +733,7 @@ if (!localStorage.getItem(STORAGE_KEYS.deviceId)) {
   localStorage.setItem(STORAGE_KEYS.deviceId, deviceId);
 }
 
-if (!datasetMeta.updatedAt) datasetMeta.updatedAt = tasks.length ? new Date().toISOString() : null;
+if (!datasetMeta.updatedAt) datasetMeta.updatedAt = new Date().toISOString();
 datasetMeta.deviceId = datasetMeta.deviceId || deviceId;
 localStorage.setItem(STORAGE_KEYS.dataset, JSON.stringify(datasetMeta));
 
@@ -944,6 +945,12 @@ function escapeDriveQueryValue(value) {
   return String(value).replace(/'/g, "\\'");
 }
 
+function toValidDate(value) {
+  if (!value) return null;
+  const d = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 function refreshPassphraseTimeout() {
   if (!syncPassphrase) return;
   if (passphraseTimeoutId) clearTimeout(passphraseTimeoutId);
@@ -1032,9 +1039,8 @@ function scheduleSyncPush() {
 function bufferToBase64(buffer) {
   const bytes = new Uint8Array(buffer);
   let binary = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  for (let i = 0; i < bytes.length; i += BASE64_CHUNK_SIZE) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + BASE64_CHUNK_SIZE));
   }
   return btoa(binary);
 }
@@ -1083,10 +1089,15 @@ async function decryptEnvelope(envelope, passphrase) {
   const saltRaw = envelope.kdf?.salt;
   const ivRaw = envelope.cipher?.iv;
   if (!saltRaw || !ivRaw || !envelope.data) throw new Error('Invalid payload');
-  const iterations = Number(envelope.kdf?.iterations) || KDF_ITERATIONS;
+  const hasIterations = envelope.kdf?.iterations !== undefined && envelope.kdf?.iterations !== null;
+  const iterations = Number(envelope.kdf?.iterations);
+  if (hasIterations && (!Number.isFinite(iterations) || iterations <= 0)) {
+    throw new Error('Invalid KDF iterations');
+  }
+  const kdfIterations = hasIterations ? iterations : KDF_ITERATIONS;
   const salt = new Uint8Array(base64ToBuffer(saltRaw));
   const iv = new Uint8Array(base64ToBuffer(ivRaw));
-  const key = await deriveKey(passphrase, salt, iterations);
+  const key = await deriveKey(passphrase, salt, kdfIterations);
   const ciphertext = base64ToBuffer(envelope.data);
   const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
   return JSON.parse(textDecoder.decode(plaintext));
@@ -1236,11 +1247,20 @@ async function performSync(reason) {
   try {
     const localDataset = buildDataset();
     const remote = await fetchRemoteDataset();
-    const lastSync = syncState.lastSyncAt ? new Date(syncState.lastSyncAt) : null;
+    const lastSync = toValidDate(syncState.lastSyncAt);
 
     if (remote?.dataset) {
-      const remoteUpdated = remote.dataset.updatedAt ? new Date(remote.dataset.updatedAt) : null;
-      const localUpdated = localDataset.updatedAt ? new Date(localDataset.updatedAt) : null;
+      const remoteUpdated = toValidDate(remote.dataset.updatedAt);
+      if (!remoteUpdated) throw new Error('Remote data missing updatedAt');
+      const localUpdated = toValidDate(localDataset.updatedAt);
+      if (!syncState.lastSyncAt && !tasks.length) {
+        applyRemoteDataset(remote.dataset);
+        syncState.lastSyncAt = new Date().toISOString();
+        persistSyncState();
+        updateSyncUI();
+        if (reason === 'manual') showToast('Sync complete ✓');
+        return;
+      }
       const conflict = isConflict(lastSync, remoteUpdated, localUpdated);
       if (remoteUpdated && localUpdated) {
         if (remoteUpdated > localUpdated) {
@@ -1266,7 +1286,7 @@ async function performSync(reason) {
   } catch (e) {
     const msg = e?.name === 'OperationError'
       ? 'Decryption failed: verify passphrase or check data integrity'
-      : (e.message || 'Sync failed');
+      : (e.message || 'Unexpected sync error');
     syncState.lastError = msg;
     persistSyncState();
     updateSyncUI();
