@@ -571,7 +571,7 @@
       </button>
     </div>
     <div class="config-row">
-      <input class="config-input" id="syncPassphrase" type="password" placeholder="Passphrase (not stored)" maxlength="128" autocomplete="new-password" onkeydown="if(event.key==='Enter') setSyncPassphrase()" />
+      <input class="config-input" id="syncPassphrase" type="password" placeholder="Passphrase (not stored)" maxlength="128" autocomplete="off" onkeydown="if(event.key==='Enter') setSyncPassphrase()" />
       <button class="config-save" onclick="setSyncPassphrase()" style="white-space:nowrap;">Unlock</button>
     </div>
     <div class="sync-status" id="syncStatus"></div>
@@ -702,9 +702,10 @@ const STORAGE_KEYS = {
   deviceId: 'tf_device_id',
 };
 const SYNC_FILE_NAME = 'taskflow-sync';
-const KDF_ITERATIONS = 600000;
+const KDF_ITERATIONS = 300000;
 const SYNC_DEBOUNCE_DELAY_MS = 1500;
-const PASSPHRASE_TIMEOUT_MS = 10 * 60 * 1000;
+const MINUTES_TO_MS = 60 * 1000;
+const PASSPHRASE_TIMEOUT_MS = 10 * MINUTES_TO_MS;
 
 function loadJson(key, fallback) {
   try {
@@ -939,6 +940,10 @@ function formatTimestamp(ts) {
   return d.toLocaleString('en-AU', { dateStyle: 'short', timeStyle: 'short' });
 }
 
+function escapeDriveQueryValue(value) {
+  return String(value).replace(/'/g, "\\'");
+}
+
 function refreshPassphraseTimeout() {
   if (!syncPassphrase) return;
   if (passphraseTimeoutId) clearTimeout(passphraseTimeoutId);
@@ -948,16 +953,6 @@ function refreshPassphraseTimeout() {
     updateSyncUI();
     showToast('Sync locked — passphrase expired', true);
   }, PASSPHRASE_TIMEOUT_MS);
-}
-
-function clearSyncPassphrase(message) {
-  syncPassphrase = '';
-  if (passphraseTimeoutId) {
-    clearTimeout(passphraseTimeoutId);
-    passphraseTimeoutId = null;
-  }
-  updateSyncUI();
-  if (message) showToast(message, true);
 }
 
 function updateSyncUI() {
@@ -1012,8 +1007,6 @@ function toggleSyncEnabled() {
   if (enabled) {
     if (!syncPassphrase) showToast('Enter a passphrase to sync', true);
     if (accessToken && syncPassphrase) syncNow('enable');
-  } else {
-    clearSyncPassphrase();
   }
 }
 
@@ -1085,7 +1078,8 @@ async function encryptDataset(dataset, passphrase) {
 }
 
 async function decryptEnvelope(envelope, passphrase) {
-  if (!envelope || envelope.v !== 1) throw new Error('Missing or unsupported payload version');
+  if (!envelope) throw new Error('Missing encryption envelope');
+  if (envelope.v !== 1) throw new Error(`Unsupported payload version: ${envelope.v}`);
   const saltRaw = envelope.kdf?.salt;
   const ivRaw = envelope.cipher?.iv;
   if (!saltRaw || !ivRaw || !envelope.data) throw new Error('Invalid payload');
@@ -1143,7 +1137,8 @@ async function findDriveFile() {
     syncState.fileId = null;
     persistSyncState();
   }
-  const query = encodeURIComponent(`name='${SYNC_FILE_NAME}' and 'appDataFolder' in parents and trashed=false`);
+  const safeName = escapeDriveQueryValue(SYNC_FILE_NAME);
+  const query = encodeURIComponent(`name='${safeName}' and 'appDataFolder' in parents and trashed=false`);
   const res = await driveRequest(
     `https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${query}&fields=files(id,name,modifiedTime)`
   );
@@ -1221,6 +1216,17 @@ async function pushLocalDataset(dataset, fileId) {
   await uploadDrivePayload(payload, fileId);
 }
 
+function isConflict(lastSync, remoteUpdated, localUpdated) {
+  return !!(
+    lastSync &&
+    remoteUpdated &&
+    localUpdated &&
+    remoteUpdated > lastSync &&
+    localUpdated > lastSync &&
+    remoteUpdated.getTime() !== localUpdated.getTime()
+  );
+}
+
 async function performSync(reason) {
   if (syncInProgress) return;
   syncInProgress = true;
@@ -1231,21 +1237,11 @@ async function performSync(reason) {
     const localDataset = buildDataset();
     const remote = await fetchRemoteDataset();
     const lastSync = syncState.lastSyncAt ? new Date(syncState.lastSyncAt) : null;
-    let conflict = false;
 
     if (remote?.dataset) {
       const remoteUpdated = remote.dataset.updatedAt ? new Date(remote.dataset.updatedAt) : null;
       const localUpdated = localDataset.updatedAt ? new Date(localDataset.updatedAt) : null;
-      if (
-        lastSync &&
-        remoteUpdated &&
-        localUpdated &&
-        remoteUpdated > lastSync &&
-        localUpdated > lastSync &&
-        remoteUpdated.getTime() !== localUpdated.getTime()
-      ) {
-        conflict = true;
-      }
+      const conflict = isConflict(lastSync, remoteUpdated, localUpdated);
       if (remoteUpdated && localUpdated) {
         if (remoteUpdated > localUpdated) {
           applyRemoteDataset(remote.dataset);
@@ -1269,7 +1265,7 @@ async function performSync(reason) {
     if (reason === 'manual') showToast('Sync complete ✓');
   } catch (e) {
     const msg = e?.name === 'OperationError'
-      ? 'Passphrase incorrect or payload corrupted'
+      ? 'Decryption failed: verify passphrase or check data integrity'
       : (e.message || 'Sync failed');
     syncState.lastError = msg;
     persistSyncState();
